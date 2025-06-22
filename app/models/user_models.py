@@ -10,6 +10,7 @@ class User(Base):
     id = Column(String, primary_key=True, index=True)
     role = Column(String, nullable=False)  # 'student', 'parent', 'teacher', 'admin'
     phone = Column(Integer, unique=True, nullable=False)
+    password_hash = Column(String, nullable=False)  # Added password
     full_name = Column(String, nullable=False)
     avatar_url = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

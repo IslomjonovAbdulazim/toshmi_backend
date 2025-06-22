@@ -7,7 +7,11 @@ from app.routes import (
     teacher_router,
     student_router,
     parent_router,
-    schedule_router
+    schedule_router,
+    profile_router,
+    calendar_router,
+    search_router,
+    analytics_router
 )
 
 app = FastAPI(
@@ -37,6 +41,16 @@ app.include_router(teacher_router, prefix="/teacher", tags=["Teacher"])
 app.include_router(student_router, prefix="/student", tags=["Student"])
 app.include_router(parent_router, prefix="/parent", tags=["Parent"])
 app.include_router(schedule_router, prefix="/schedule", tags=["Schedule"])
+
+# Include optional routers if they loaded successfully
+if profile_router:
+    app.include_router(profile_router, prefix="/profile", tags=["Profile"])
+if calendar_router:
+    app.include_router(calendar_router, prefix="/calendar", tags=["Calendar"])
+if search_router:
+    app.include_router(search_router, prefix="/search", tags=["Search"])
+if analytics_router:
+    app.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
 
 @app.get("/")
 def root():

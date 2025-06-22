@@ -4,3 +4,4 @@ from .grade_crud import *
 from .misc_crud import *
 from .bulk_grade_crud import *
 from .recent_grades_crud import *
+from .missing_crud import *

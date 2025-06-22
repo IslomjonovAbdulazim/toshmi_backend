@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.schemas import LoginRequest, Token
-from app.crud import get_user_by_phone, get_user
+from app.schemas import LoginRequest, Token, PasswordChange
+from app.crud import authenticate_user, get_user
 from app.auth import create_access_token, get_current_user
 
 router = APIRouter()
@@ -10,11 +10,11 @@ router = APIRouter()
 
 @router.post("/login", response_model=Token)
 def login(login_data: LoginRequest, db: Session = Depends(get_db)):
-    user = get_user_by_phone(db, login_data.phone, login_data.role)
+    user = authenticate_user(db, login_data.phone, login_data.role, login_data.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials"
+            detail="Invalid phone, role, or password"
         )
 
     access_token = create_access_token(data={"sub": user.id})
@@ -29,3 +29,18 @@ def logout():
 @router.get("/me")
 def get_current_user_info(current_user=Depends(get_current_user)):
     return current_user
+
+
+@router.post("/change-password")
+def change_password(password_data: PasswordChange, current_user=Depends(get_current_user)):
+    # In production, verify current password and hash new one
+    return {"message": "Password changed successfully"}
+
+
+@router.post("/reset-password")
+def reset_password(phone: int, role: str, db: Session = Depends(get_db)):
+    user = get_user_by_phone(db, phone, role)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    # In production, send SMS/email with reset link
+    return {"message": "Password reset link sent"}

@@ -1,8 +1,7 @@
 from sqlalchemy.orm import Session
-from app.models import Homework, Exam, Student, User, HomeworkGrade, ExamGrade, GroupSubject
-from app.schemas import StudentGradeRow, HomeworkGradingTable, ExamGradingTable, BulkGradeSubmission, \
-    HomeworkGradeCreate, ExamGradeCreate
-from app.crud import create_homework_grade, create_exam_grade
+from app.models import *
+from app.schemas import *
+from app.crud import create_homework_grade, create_exam_grade, create_attendance
 import uuid
 
 
@@ -138,5 +137,81 @@ def submit_bulk_exam_grades(db: Session, exam_id: str, grades: list):
             )
             new_grade = create_exam_grade(db, grade_create)
             results.append(new_grade)
+
+    return results
+
+
+# Bulk Attendance Functions
+def get_attendance_table(db: Session, group_subject_id: str, date: str):
+    # Get group_subject info
+    group_subject = db.query(GroupSubject).filter(GroupSubject.id == group_subject_id).first()
+    if not group_subject:
+        return None
+
+    group = db.query(Group).filter(Group.id == group_subject.group_id).first()
+    subject = db.query(Subject).filter(Subject.id == group_subject.subject_id).first()
+
+    # Get students in the group
+    students = db.query(Student).filter(Student.group_id == group_subject.group_id).all()
+
+    student_rows = []
+    for student in students:
+        # Get user info for student name
+        user = db.query(User).filter(User.id == student.user_id).first()
+
+        # Get existing attendance if any
+        existing_attendance = db.query(Attendance).filter(
+            Attendance.student_id == student.id,
+            Attendance.group_subject_id == group_subject_id,
+            Attendance.date == date
+        ).first()
+
+        student_rows.append(StudentAttendanceRow(
+            student_id=student.id,
+            student_name=user.full_name if user else "Unknown",
+            current_status=existing_attendance.status if existing_attendance else None,
+            current_comment=existing_attendance.comment if existing_attendance else None
+        ))
+
+    return AttendanceTable(
+        group_subject_id=group_subject_id,
+        subject_name=subject.name if subject else "Unknown",
+        group_name=group.name if group else "Unknown",
+        date=date,
+        students=student_rows
+    )
+
+
+def submit_bulk_attendance(db: Session, group_subject_id: str, date: str, attendance_data: list):
+    from datetime import datetime
+
+    date_obj = datetime.fromisoformat(date) if isinstance(date, str) else date
+    results = []
+
+    for attendance_item in attendance_data:
+        # Check if attendance already exists
+        existing = db.query(Attendance).filter(
+            Attendance.student_id == attendance_item["student_id"],
+            Attendance.group_subject_id == group_subject_id,
+            Attendance.date == date_obj
+        ).first()
+
+        if existing:
+            # Update existing attendance
+            existing.status = attendance_item["status"]
+            existing.comment = attendance_item.get("comment")
+            db.commit()
+            results.append(existing)
+        else:
+            # Create new attendance
+            attendance_create = AttendanceCreate(
+                student_id=attendance_item["student_id"],
+                group_subject_id=group_subject_id,
+                date=date_obj,
+                status=attendance_item["status"],
+                comment=attendance_item.get("comment")
+            )
+            new_attendance = create_attendance(db, attendance_create)
+            results.append(new_attendance)
 
     return results

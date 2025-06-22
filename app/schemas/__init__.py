@@ -22,5 +22,13 @@ from .misc_schemas import (
     NewsBase, NewsCreate, NewsResponse
 )
 from .auth_schemas import LoginRequest, Token, TokenData
-from .bulk_grade_schemas import StudentGradeRow, HomeworkGradingTable, ExamGradingTable, BulkGradeSubmission
+from .bulk_grade_schemas import (
+    StudentGradeRow, HomeworkGradingTable, ExamGradingTable, BulkGradeSubmission,
+    StudentAttendanceRow, AttendanceTable, BulkAttendanceSubmission
+)
 from .recent_grades_schemas import RecentGradeItem, RecentGradesResponse
+from .missing_schemas import (
+    UserUpdate, StudentEnrollment, GroupTransfer, BulkStudentCreate,
+    StudentSearch, GradeFilter, ClassReport, PaymentReport,
+    FileUpload, PasswordChange, AcademicEvent
+)

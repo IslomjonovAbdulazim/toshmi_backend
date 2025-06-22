@@ -68,3 +68,51 @@ def create_news_endpoint(news: NewsCreate, db: Session = Depends(get_db), admin 
 @router.get("/news", response_model=List[NewsResponse])
 def get_news_endpoint(db: Session = Depends(get_db)):
     return get_all_news(db)
+
+# GroupSubject Management
+@router.post("/group-subjects", response_model=GroupSubjectResponse)
+def create_group_subject_endpoint(group_subject: GroupSubjectCreate, db: Session = Depends(get_db), admin = Depends(require_admin)):
+    return create_group_subject(db, group_subject)
+
+@router.get("/group-subjects", response_model=List[GroupSubjectResponse])
+def get_group_subjects_endpoint(db: Session = Depends(get_db), admin = Depends(require_admin)):
+    return get_all_group_subjects(db)
+
+@router.patch("/group-subjects/{group_subject_id}", response_model=GroupSubjectResponse)
+def update_group_subject_endpoint(group_subject_id: str, group_subject: GroupSubjectCreate, db: Session = Depends(get_db), admin = Depends(require_admin)):
+    return update_group_subject(db, group_subject_id, group_subject)
+
+@router.delete("/group-subjects/{group_subject_id}")
+def delete_group_subject_endpoint(group_subject_id: str, db: Session = Depends(get_db), admin = Depends(require_admin)):
+    result = delete_group_subject(db, group_subject_id)
+    return {"deleted": result}
+
+# Student Management
+@router.patch("/users/{user_id}")
+def update_user_profile_endpoint(user_id: str, user_update: UserUpdate, db: Session = Depends(get_db), admin = Depends(require_admin)):
+    return update_user_profile(db, user_id, user_update)
+
+@router.post("/students/enroll")
+def enroll_student_endpoint(enrollment: StudentEnrollment, db: Session = Depends(get_db), admin = Depends(require_admin)):
+    return enroll_student_in_group(db, enrollment.student_id, enrollment.group_id)
+
+@router.post("/students/transfer")
+def transfer_students_endpoint(transfer: GroupTransfer, db: Session = Depends(get_db), admin = Depends(require_admin)):
+    return bulk_transfer_students(db, transfer.student_ids, transfer.from_group_id, transfer.to_group_id)
+
+@router.post("/students/bulk-create")
+def bulk_create_students_endpoint(bulk_data: BulkStudentCreate, db: Session = Depends(get_db), admin = Depends(require_admin)):
+    return bulk_create_students(db, bulk_data.students)
+
+# Search & Reports
+@router.get("/students/search")
+def search_students_endpoint(name: str = None, group_id: str = None, graduation_year: int = None, db: Session = Depends(get_db), admin = Depends(require_admin)):
+    return search_students(db, name, group_id, graduation_year)
+
+@router.get("/reports/class")
+def get_class_report_endpoint(group_id: str, subject_id: str, db: Session = Depends(get_db), admin = Depends(require_admin)):
+    return get_class_report(db, group_id, subject_id)
+
+@router.get("/reports/payments")
+def get_payment_report_endpoint(month: int, year: int, db: Session = Depends(get_db), admin = Depends(require_admin)):
+    return get_payment_report(db, month, year)

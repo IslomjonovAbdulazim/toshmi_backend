@@ -4,14 +4,7 @@ from typing import List
 from app.database import get_db
 from app.dependencies import require_teacher
 from app.schemas import *
-from app.crud import (
-    create_homework, get_homework_by_group_subject, get_homework,
-    create_homework_grade, get_homework_grades_by_student, get_homework_grades_by_homework,
-    create_exam, get_exams_by_group_subject, get_exam,
-    create_exam_grade, get_exam_grades_by_student, get_exam_grades_by_exam,
-    create_attendance, get_attendance_by_student, get_attendance_by_group_subject_and_date,
-    get_homework_grading_table, get_exam_grading_table, submit_bulk_homework_grades, submit_bulk_exam_grades
-)
+from app.crud import *
 
 router = APIRouter()
 
@@ -120,3 +113,16 @@ def get_student_recent_grades(student_id: str, db: Session = Depends(get_db), te
     if not result:
         raise HTTPException(status_code=404, detail="Student not found or no grades")
     return result
+
+# Bulk Attendance - NEW ENDPOINTS
+@router.get("/attendance/table", response_model=AttendanceTable)
+def get_attendance_table_endpoint(group_subject_id: str, date: str, db: Session = Depends(get_db), teacher = Depends(require_teacher)):
+    table = get_attendance_table(db, group_subject_id, date)
+    if not table:
+        raise HTTPException(status_code=404, detail="Group subject not found")
+    return table
+
+@router.post("/attendance/bulk")
+def submit_bulk_attendance_endpoint(group_subject_id: str, date: str, attendance: List[dict], db: Session = Depends(get_db), teacher = Depends(require_teacher)):
+    results = submit_bulk_attendance(db, group_subject_id, date, attendance)
+    return {"message": f"Marked attendance for {len(results)} students", "results": results}

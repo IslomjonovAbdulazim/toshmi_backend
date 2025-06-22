@@ -51,22 +51,11 @@ app.add_middleware(
 # Database initialization
 @app.on_event("startup")
 def startup_event():
-    if ENVIRONMENT == "production":
-        # Run Alembic migrations in production
-        try:
-            import alembic.config
-            import alembic.command
-            alembic_cfg = alembic.config.Config("alembic.ini")
-            alembic.command.upgrade(alembic_cfg, "head")
-            print("✅ Database migrations applied successfully")
-        except Exception as e:
-            print(f"❌ Migration error: {e}")
-            # Fallback to create_tables if migrations fail
-            create_tables()
-    else:
-        # Development: create tables directly
+    try:
         create_tables()
-        print("✅ Development database tables created")
+        print("✅ Database tables created successfully")
+    except Exception as e:
+        print(f"❌ Database error: {e}")
 
 # Include routers
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])

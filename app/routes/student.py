@@ -5,7 +5,7 @@ from app.database import get_db
 from app.dependencies import require_student
 from app.schemas import *
 from app.crud import *
-from app.models import Student
+from app.utils.permissions import inject_student_record
 
 router = APIRouter()
 
@@ -14,43 +14,31 @@ router = APIRouter()
 def get_student_info(student_id: str, db: Session = Depends(get_db), student=Depends(require_student)):
     student_data = get_student(db, student_id)
     if not student_data:
-        raise HTTPException(status_code=404, detail="Student not found")
+        raise HTTPException(404, "Student not found")
     return student_data
 
 
 @router.get("/homework-grades", response_model=List[HomeworkGradeResponse])
-def get_my_homework_grades(db: Session = Depends(get_db), current_student=Depends(require_student)):
-    # Get student record from user
-    student_record = db.query(Student).filter(Student.user_id == current_student.id).first()
-    if not student_record:
-        raise HTTPException(status_code=404, detail="Student record not found")
+@inject_student_record
+def get_my_homework_grades(student_record=None, db: Session = Depends(get_db), current_student=Depends(require_student)):
     return get_homework_grades_by_student(db, student_record.id)
 
 
 @router.get("/exam-grades", response_model=List[ExamGradeResponse])
-def get_my_exam_grades(db: Session = Depends(get_db), current_student=Depends(require_student)):
-    # Get student record from user
-    student_record = db.query(Student).filter(Student.user_id == current_student.id).first()
-    if not student_record:
-        raise HTTPException(status_code=404, detail="Student record not found")
+@inject_student_record
+def get_my_exam_grades(student_record=None, db: Session = Depends(get_db), current_student=Depends(require_student)):
     return get_exam_grades_by_student(db, student_record.id)
 
 
 @router.get("/attendance", response_model=List[AttendanceResponse])
-def get_my_attendance(db: Session = Depends(get_db), current_student=Depends(require_student)):
-    # Get student record from user
-    student_record = db.query(Student).filter(Student.user_id == current_student.id).first()
-    if not student_record:
-        raise HTTPException(status_code=404, detail="Student record not found")
+@inject_student_record
+def get_my_attendance(student_record=None, db: Session = Depends(get_db), current_student=Depends(require_student)):
     return get_attendance_by_student(db, student_record.id)
 
 
 @router.get("/schedule", response_model=List[ScheduleResponse])
-def get_my_schedule(db: Session = Depends(get_db), current_student=Depends(require_student)):
-    # Get student record from user
-    student_record = db.query(Student).filter(Student.user_id == current_student.id).first()
-    if not student_record:
-        raise HTTPException(status_code=404, detail="Student record not found")
+@inject_student_record
+def get_my_schedule(student_record=None, db: Session = Depends(get_db), current_student=Depends(require_student)):
     return get_schedule_by_group(db, student_record.group_id)
 
 
@@ -60,13 +48,9 @@ def get_news_for_students(db: Session = Depends(get_db), student=Depends(require
 
 
 @router.get("/recent-grades", response_model=RecentGradesResponse)
-def get_my_recent_grades(db: Session = Depends(get_db), current_student=Depends(require_student)):
-    # Get student record from user
-    student_record = db.query(Student).filter(Student.user_id == current_student.id).first()
-    if not student_record:
-        raise HTTPException(status_code=404, detail="Student record not found")
-
+@inject_student_record
+def get_my_recent_grades(student_record=None, db: Session = Depends(get_db), current_student=Depends(require_student)):
     result = get_recent_grades(db, student_record.id)
     if not result:
-        raise HTTPException(status_code=404, detail="No grades found")
+        raise HTTPException(404, "No grades found")
     return result

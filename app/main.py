@@ -9,10 +9,14 @@ from app.routes import (
     parent_router,
     schedule_router,
     profile_router,
-    calendar_router,
-    search_router,
-    analytics_router
+    search_router
 )
+
+# Import bulk router
+try:
+    from app.routes.bulk import router as bulk_router
+except ImportError:
+    bulk_router = None
 
 app = FastAPI(
     title="School Management System API",
@@ -45,12 +49,10 @@ app.include_router(schedule_router, prefix="/schedule", tags=["Schedule"])
 # Include optional routers if they loaded successfully
 if profile_router:
     app.include_router(profile_router, prefix="/profile", tags=["Profile"])
-if calendar_router:
-    app.include_router(calendar_router, prefix="/calendar", tags=["Calendar"])
 if search_router:
     app.include_router(search_router, prefix="/search", tags=["Search"])
-if analytics_router:
-    app.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
+if bulk_router:
+    app.include_router(bulk_router, prefix="/bulk", tags=["Bulk Operations"])
 
 @app.get("/")
 def root():

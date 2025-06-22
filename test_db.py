@@ -11,13 +11,20 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database import engine, SessionLocal, create_tables, Base
 from app.models import User, Student, Parent, Teacher, Group, Subject, GroupSubject
+from sqlalchemy import text
 import uuid
 
 
 def reset_database():
-    """Drop all tables and recreate them"""
+    """Drop all tables and recreate them with CASCADE"""
     print("Dropping all tables...")
-    Base.metadata.drop_all(bind=engine)
+
+    # Use raw SQL to drop all tables with CASCADE
+    with engine.connect() as conn:
+        conn.execute(text("DROP SCHEMA public CASCADE"))
+        conn.execute(text("CREATE SCHEMA public"))
+        conn.commit()
+
     print("Creating fresh tables...")
     create_tables()
     print("Database reset complete")
@@ -29,12 +36,11 @@ def create_admin_user():
     try:
         from app.utils.password import hash_password
 
-        # Create admin user with password
         admin_user = User(
             id=str(uuid.uuid4()),
             role="admin",
             phone=990330919,
-            password_hash=hash_password("admin123"),  # Password: admin123
+            password_hash=hash_password("admin123"),
             full_name="Admin User",
             avatar_url=None
         )
@@ -67,33 +73,28 @@ def create_sample_data():
 
         created_subjects = []
         for subject_data in subjects:
-            existing = db.query(Subject).filter(Subject.name == subject_data["name"]).first()
-            if not existing:
-                subject = Subject(
-                    id=str(uuid.uuid4()),
-                    name=subject_data["name"]
-                )
-                db.add(subject)
-                created_subjects.append(subject)
+            subject = Subject(
+                id=str(uuid.uuid4()),
+                name=subject_data["name"]
+            )
+            db.add(subject)
+            created_subjects.append(subject)
 
         # Create groups
         groups = [
-            {"name": "10A", "student_ids": []},
-            {"name": "10B", "student_ids": []},
-            {"name": "11A", "student_ids": []}
+            {"name": "10A"},
+            {"name": "10B"},
+            {"name": "11A"}
         ]
 
         created_groups = []
         for group_data in groups:
-            existing = db.query(Group).filter(Group.name == group_data["name"]).first()
-            if not existing:
-                group = Group(
-                    id=str(uuid.uuid4()),
-                    name=group_data["name"],
-                    student_ids=group_data["student_ids"]
-                )
-                db.add(group)
-                created_groups.append(group)
+            group = Group(
+                id=str(uuid.uuid4()),
+                name=group_data["name"]
+            )
+            db.add(group)
+            created_groups.append(group)
 
         db.commit()
         print(f"Created {len(created_subjects)} subjects and {len(created_groups)} groups")
@@ -108,15 +109,11 @@ def create_sample_data():
 def main():
     """Main setup function"""
     print("Resetting database completely...")
-
-    # Reset database (drop + recreate tables)
     reset_database()
 
-    # Create admin user
     print("Creating admin user...")
     admin = create_admin_user()
 
-    # Create sample data
     print("Creating sample data...")
     create_sample_data()
 

@@ -11,19 +11,15 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database import engine, SessionLocal, create_tables, Base
 from app.models import User, Student, Parent, Teacher, Group, Subject, GroupSubject
-from sqlalchemy import text
 import uuid
 
 
 def reset_database():
-    """Drop all tables and recreate them with CASCADE"""
+    """Drop all tables and recreate them"""
     print("Dropping all tables...")
 
-    # Use raw SQL to drop all tables with CASCADE
-    with engine.connect() as conn:
-        conn.execute(text("DROP SCHEMA public CASCADE"))
-        conn.execute(text("CREATE SCHEMA public"))
-        conn.commit()
+    # For SQLite, simply drop all tables
+    Base.metadata.drop_all(bind=engine)
 
     print("Creating fresh tables...")
     create_tables()

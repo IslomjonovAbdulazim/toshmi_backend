@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey, Boolean, Integer, Float, Text, ARRAY
+from sqlalchemy import Column, String, DateTime, ForeignKey, Boolean, Integer, Float, Text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
@@ -39,6 +39,6 @@ class News(Base):
     id = Column(String, primary_key=True, index=True)
     title = Column(String, nullable=False)
     body = Column(Text, nullable=False)
-    media_urls = Column(ARRAY(String), nullable=True)  # image/video URLs
-    links = Column(ARRAY(String), nullable=True)  # resource URLs
+    media_urls = Column(Text, nullable=True)  # JSON string instead of ARRAY
+    links = Column(Text, nullable=True)  # JSON string instead of ARRAY
     created_at = Column(DateTime, default=datetime.utcnow)

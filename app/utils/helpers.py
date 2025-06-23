@@ -63,6 +63,47 @@ ALLOWED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
 ALLOWED_DOCUMENT_EXTENSIONS = {'.pdf', '.doc', '.docx', '.txt', '.rtf'}
 
 
+def sanitize_phone_number(phone: Union[str, int]) -> int:
+    """
+    Sanitize and validate phone number
+
+    Args:
+        phone: Phone number as string or int
+
+    Returns:
+        Cleaned phone number as integer
+
+    Raises:
+        ValueError: If phone number is invalid
+    """
+    # Convert to string and remove all non-digits
+    phone_str = str(phone).strip()
+    phone_digits = ''.join(filter(str.isdigit, phone_str))
+
+    # Validate length (should be between 9-15 digits)
+    if len(phone_digits) < 9 or len(phone_digits) > 15:
+        raise ValueError("Phone number must be between 9-15 digits")
+
+    return int(phone_digits)
+
+
+def clean_string(text: str) -> str:
+    """
+    Clean and normalize string
+
+    Args:
+        text: Input text
+
+    Returns:
+        Cleaned text
+    """
+    if not text:
+        return ""
+
+    # Remove extra whitespace and normalize
+    return ' '.join(text.strip().split())
+
+
 def format_phone_number(phone: int) -> str:
     """
     Format phone number for display
@@ -481,23 +522,6 @@ def truncate_text(text: str, max_length: int = 100) -> str:
         return text
 
     return text[:max_length - 3] + "..."
-
-
-def clean_string(text: str) -> str:
-    """
-    Clean and normalize string
-
-    Args:
-        text: Input text
-
-    Returns:
-        Cleaned text
-    """
-    if not text:
-        return ""
-
-    # Remove extra whitespace and normalize
-    return ' '.join(text.strip().split())
 
 
 def generate_notification_message(notification_type: str, **kwargs) -> str:

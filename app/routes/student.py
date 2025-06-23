@@ -8,7 +8,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from datetime import date
-
+from sqlalchemy import func  # Add this import at top
 from ..database import get_db
 from ..services.academic_service import get_academic_service
 from ..utils.dependencies import require_student, get_current_student_profile

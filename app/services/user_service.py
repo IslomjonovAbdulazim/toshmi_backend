@@ -12,7 +12,9 @@ from datetime import datetime
 
 from ..models import User, Student, Parent, Teacher, Group
 from ..utils.auth import hash_password, generate_secure_password
+# Line 11 - MISSING IMPORTS
 from ..utils.helpers import UserRole, sanitize_phone_number, clean_string
+#                                    ↑ Not in helpers.py    ↑ Not defined anywhere
 from ..schemas.users import (
     StudentCreate, ParentCreate, TeacherCreate,
     StudentUpdate, ParentUpdate, TeacherUpdate,

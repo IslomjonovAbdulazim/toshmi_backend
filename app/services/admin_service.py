@@ -7,12 +7,15 @@ Handles groups, subjects, schedules, payments, news, and comprehensive reporting
 from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func, desc, extract
-from fastapi import HTTPException, status
+from sqlalchemy import func  # Was missing this
+from fastapi import status
+from fastapi import HTTPException
 from datetime import datetime, date
+from starlette.status import HTTP_500_INTERNAL_SERVER_ERROR
 
 from ..models import (
     Group, Subject, GroupSubject, Schedule, Student, Teacher, Parent, User,
-    Payment, MonthlyPaymentStatus, News, Notification, Grade, Attendance
+    Payment, MonthlyPaymentStatus, News, Notification, Grade, Attendance, Homework, Exam
 )
 from ..utils.helpers import (
     DayOfWeek, clean_string, serialize_external_links, parse_external_links,
@@ -827,7 +830,7 @@ class AdminService:
 
         except Exception as e:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error generating payment report: {str(e)}"
             )
 

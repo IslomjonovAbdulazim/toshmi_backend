@@ -5,13 +5,16 @@ Handles parent access to their children's academic information and progress moni
 """
 
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from datetime import date
-
+from sqlalchemy import func  # Was missing this
 from ..database import get_db
 from ..utils.dependencies import require_parent, get_current_parent_profile, validate_parent_children_access
 from ..schemas.academic import GradeResponse, AttendanceResponse
+from fastapi import status  # Import status separately
+from starlette.status import HTTP_404_NOT_FOUND
+
 
 router = APIRouter()
 
@@ -642,7 +645,7 @@ async def get_child_payments(
 
     if not child:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=HTTP_404_NOT_FOUND,
             detail="Child not found or access denied"
         )
 

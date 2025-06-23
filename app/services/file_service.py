@@ -7,7 +7,9 @@ Handles uploads, downloads, validation, and secure file operations.
 import os
 import uuid
 import shutil
-from typing import Optional, Dict, Any, BinaryIO
+from typing import Optional, Dict, Any, BinaryIO, List
+from sqlalchemy import func  # Add this import at top
+
 from pathlib import Path
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status, UploadFile

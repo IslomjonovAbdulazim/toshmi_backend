@@ -35,7 +35,8 @@ class Student(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=False, unique=True)
     group_id = Column(String, ForeignKey("groups.id"), nullable=False, index=True)
     graduation_year = Column(Integer, nullable=False, index=True)
-
+    parent_id = Column(String, ForeignKey("parents.id"), nullable=True)  # Add this
+    parent = relationship("Parent")  # Add this
     user = relationship("User", backref="student_profile")
     group = relationship("Group", back_populates="students")
     parents = relationship("Parent", secondary=parent_student, back_populates="students")

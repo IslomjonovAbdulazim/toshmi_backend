@@ -50,14 +50,21 @@ def create_student(db: Session, student: StudentCreate):
         id=str(uuid.uuid4()),
         user_id=student.user_id,
         group_id=student.group_id,
-        parent_id=student.parent_id,
         graduation_year=student.graduation_year
+        # Remove parent_id line
     )
     db.add(db_student)
+    db.flush()  # Get the student ID
+
+    # If parent_id provided, create the relationship
+    if student.parent_id:
+        parent = db.query(Parent).filter(Parent.id == student.parent_id).first()
+        if parent:
+            db_student.parents.append(parent)
+
     db.commit()
     db.refresh(db_student)
     return db_student
-
 
 def get_student(db: Session, student_id: str):
     return db.query(Student).filter(Student.id == student_id).first()

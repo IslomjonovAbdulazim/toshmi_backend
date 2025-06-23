@@ -71,6 +71,7 @@ class StudentBase(BaseModel):
 
 
 class StudentCreate(StudentBase):
+    parent_id: Optional[str] = None
     pass
 
 

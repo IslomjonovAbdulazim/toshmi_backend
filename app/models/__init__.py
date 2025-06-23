@@ -1,3 +1,4 @@
+# app/models/__init__.py
 from .user_models import User, Student, Parent, Teacher
 from .academic_models import Group, Subject, GroupSubject, Schedule
 from .grade_models import Homework, HomeworkGrade, Exam, ExamGrade

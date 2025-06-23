@@ -1,3 +1,4 @@
+# app/crud/missing_crud.py
 from sqlalchemy.orm import Session
 from app.models import *
 from app.schemas import *
@@ -19,17 +20,6 @@ def update_user_profile(db: Session, user_id: str, user_update: UserUpdate):
 
 
 # GroupSubject Management
-def update_group_subject(db: Session, group_subject_id: str, group_subject_update: GroupSubjectCreate):
-    gs = db.query(GroupSubject).filter(GroupSubject.id == group_subject_id).first()
-    if gs:
-        gs.group_id = group_subject_update.group_id
-        gs.subject_id = group_subject_update.subject_id
-        gs.teacher_id = group_subject_update.teacher_id
-        db.commit()
-        db.refresh(gs)
-    return gs
-
-
 def delete_group_subject(db: Session, group_subject_id: str):
     gs = db.query(GroupSubject).filter(GroupSubject.id == group_subject_id).first()
     if gs:
@@ -37,68 +27,6 @@ def delete_group_subject(db: Session, group_subject_id: str):
         db.commit()
         return True
     return False
-
-
-# Student Enrollment
-def enroll_student_in_group(db: Session, student_id: str, group_id: str):
-    student = db.query(Student).filter(Student.id == student_id).first()
-    if student:
-        student.group_id = group_id
-        # Update group's student list
-        group = db.query(Group).filter(Group.id == group_id).first()
-        if group and student_id not in group.student_ids:
-            group.student_ids.append(student_id)
-        db.commit()
-        db.refresh(student)
-    return student
-
-
-def bulk_transfer_students(db: Session, student_ids: List[str], from_group_id: str, to_group_id: str):
-    results = []
-    for student_id in student_ids:
-        student = enroll_student_in_group(db, student_id, to_group_id)
-        if student:
-            # Remove from old group
-            from_group = db.query(Group).filter(Group.id == from_group_id).first()
-            if from_group and student_id in from_group.student_ids:
-                from_group.student_ids.remove(student_id)
-            results.append(student)
-    db.commit()
-    return results
-
-
-# Search & Filter
-def search_students(db: Session, name: str = None, group_id: str = None, graduation_year: int = None):
-    query = db.query(Student).join(User, Student.user_id == User.id)
-
-    if name:
-        query = query.filter(User.full_name.ilike(f"%{name}%"))
-    if group_id:
-        query = query.filter(Student.group_id == group_id)
-    if graduation_year:
-        query = query.filter(Student.graduation_year == graduation_year)
-
-    return query.all()
-
-
-def filter_grades(db: Session, student_id: str = None, subject_id: str = None, date_from=None, date_to=None):
-    # Homework grades
-    hw_query = (
-        db.query(HomeworkGrade, Homework, GroupSubject)
-        .join(Homework, HomeworkGrade.homework_id == Homework.id)
-        .join(GroupSubject, Homework.group_subject_id == GroupSubject.id)
-    )
-
-    if student_id:
-        hw_query = hw_query.filter(HomeworkGrade.student_id == student_id)
-    if subject_id:
-        hw_query = hw_query.filter(GroupSubject.subject_id == subject_id)
-    if date_from:
-        hw_query = hw_query.filter(HomeworkGrade.graded_at >= date_from)
-    if date_to:
-        hw_query = hw_query.filter(HomeworkGrade.graded_at <= date_to)
-
-    return hw_query.all()
 
 
 # Reports
@@ -157,33 +85,3 @@ def get_payment_report(db: Session, month: int, year: int):
         students_paid=students_paid,
         students_unpaid=students_unpaid
     )
-
-
-# Bulk Operations
-def bulk_create_students(db: Session, students_data: List[dict]):
-    results = []
-    for student_data in students_data:
-        # Create user first
-        user = User(
-            id=str(uuid.uuid4()),
-            role="student",
-            phone=student_data["phone"],
-            full_name=student_data["full_name"],
-            avatar_url=None
-        )
-        db.add(user)
-        db.flush()  # Get the ID
-
-        # Create student
-        student = Student(
-            id=str(uuid.uuid4()),
-            user_id=user.id,
-            group_id=student_data["group_id"],
-            parent_id=student_data.get("parent_id"),
-            graduation_year=student_data["graduation_year"]
-        )
-        db.add(student)
-        results.append(student)
-
-    db.commit()
-    return results

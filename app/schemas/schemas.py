@@ -1,5 +1,6 @@
+# app/schemas/schemas.py
 from pydantic import BaseModel, Field, validator
-from typing import Optional, List, Any
+from typing import Optional, List
 from datetime import datetime
 
 
@@ -15,151 +16,118 @@ class Token(BaseModel):
     token_type: str
 
 
-class TokenData(BaseModel):
-    user_id: str = None
-
-
-class PasswordChange(BaseModel):
-    current_password: str = Field(..., min_length=1)
+class PasswordReset(BaseModel):
+    phone: int
+    role: str
     new_password: str = Field(..., min_length=8)
 
 
-class AdminPasswordChange(BaseModel):
-    new_password: str = Field(..., min_length=8)
-
-    @validator('new_password')
-    def validate_password(cls, v):
-        if not any(c.isupper() for c in v):
-            raise ValueError('Password must contain uppercase letter')
-        if not any(c.islower() for c in v):
-            raise ValueError('Password must contain lowercase letter')
-        if not any(c.isdigit() for c in v):
-            raise ValueError('Password must contain number')
-        return v
-
-
-# USERS
-class UserBase(BaseModel):
-    role: str = Field(..., pattern="^(student|parent|teacher|admin)$")
+# USER CREATION - Simplified with unique endpoints
+class StudentCreate(BaseModel):
     phone: int = Field(..., ge=100000000, le=999999999999)
     full_name: str = Field(..., min_length=2, max_length=100)
-    avatar_url: Optional[str] = None
+    password: str = Field(..., min_length=8)
+    group_id: str = Field(..., min_length=1)
+    parent_id: Optional[str] = None
+    graduation_year: int = Field(..., ge=2020, le=2035)
 
 
-class UserCreate(UserBase):
+class ParentCreate(BaseModel):
+    phone: int = Field(..., ge=100000000, le=999999999999)
+    full_name: str = Field(..., min_length=2, max_length=100)
     password: str = Field(..., min_length=8)
 
 
-class UserResponse(UserBase):
+class TeacherCreate(BaseModel):
+    phone: int = Field(..., ge=100000000, le=999999999999)
+    full_name: str = Field(..., min_length=2, max_length=100)
+    password: str = Field(..., min_length=8)
+
+
+# RESPONSES
+class UserResponse(BaseModel):
     id: str
+    role: str
+    phone: int
+    full_name: str
+    avatar_url: Optional[str] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
 
 
-class UserUpdate(BaseModel):
-    full_name: Optional[str] = Field(None, min_length=2, max_length=100)
-    avatar_url: Optional[str] = None
-
-
-# STUDENTS/PARENTS/TEACHERS
-class StudentBase(BaseModel):
-    user_id: str = Field(..., min_length=1)
-    group_id: str = Field(..., min_length=1)
-    graduation_year: int = Field(..., ge=2020, le=2035)
-
-
-class StudentCreate(StudentBase):
+class StudentResponse(BaseModel):
+    id: str
+    user_id: str
+    group_id: str
     parent_id: Optional[str] = None
-    pass
-
-
-class StudentResponse(StudentBase):
-    id: str
+    graduation_year: int
+    user: UserResponse
 
     class Config:
         from_attributes = True
 
 
-class ParentBase(BaseModel):
-    user_id: str = Field(..., min_length=1)
-
-
-class ParentCreate(ParentBase):
-    pass
-
-
-class ParentResponse(ParentBase):
+class ParentResponse(BaseModel):
     id: str
+    user_id: str
+    user: UserResponse
+    students: Optional[List[StudentResponse]] = None
 
     class Config:
         from_attributes = True
 
 
-class TeacherBase(BaseModel):
-    user_id: str = Field(..., min_length=1)
-
-
-class TeacherCreate(TeacherBase):
-    pass
-
-
-class TeacherResponse(TeacherBase):
+class TeacherResponse(BaseModel):
     id: str
+    user_id: str
+    user: UserResponse
 
     class Config:
         from_attributes = True
 
 
 # ACADEMIC
-class GroupBase(BaseModel):
+class GroupCreate(BaseModel):
     name: str
 
 
-class GroupCreate(GroupBase):
-    pass
-
-
-class GroupResponse(GroupBase):
+class GroupResponse(BaseModel):
     id: str
+    name: str
 
     class Config:
         from_attributes = True
 
 
-class SubjectBase(BaseModel):
+class SubjectCreate(BaseModel):
     name: str
 
 
-class SubjectCreate(SubjectBase):
-    pass
-
-
-class SubjectResponse(SubjectBase):
+class SubjectResponse(BaseModel):
     id: str
+    name: str
 
     class Config:
         from_attributes = True
 
 
-class GroupSubjectBase(BaseModel):
+class GroupSubjectCreate(BaseModel):
     group_id: str
     subject_id: str
 
 
-class GroupSubjectCreate(GroupSubjectBase):
-    pass
-
-
-class GroupSubjectResponse(GroupSubjectBase):
+class GroupSubjectResponse(BaseModel):
     id: str
+    group_id: str
+    subject_id: str
 
     class Config:
         from_attributes = True
 
 
-class ScheduleBase(BaseModel):
+class ScheduleCreate(BaseModel):
     group_id: str
     group_subject_id: str
     day_of_week: str
@@ -168,87 +136,88 @@ class ScheduleBase(BaseModel):
     room: Optional[str] = None
 
 
-class ScheduleCreate(ScheduleBase):
-    pass
-
-
-class ScheduleResponse(ScheduleBase):
+class ScheduleResponse(BaseModel):
     id: str
+    group_id: str
+    group_subject_id: str
+    day_of_week: str
+    start_time: str
+    end_time: str
+    room: Optional[str] = None
 
     class Config:
         from_attributes = True
 
 
 # GRADES
-class HomeworkBase(BaseModel):
+class HomeworkCreate(BaseModel):
     group_subject_id: str
     title: str
     description: str
     due_date: datetime
 
 
-class HomeworkCreate(HomeworkBase):
-    pass
-
-
-class HomeworkResponse(HomeworkBase):
+class HomeworkResponse(BaseModel):
     id: str
+    group_subject_id: str
+    title: str
+    description: str
+    due_date: datetime
     created_at: datetime
 
     class Config:
         from_attributes = True
 
 
-class HomeworkGradeBase(BaseModel):
+class HomeworkGradeCreate(BaseModel):
     homework_id: str
     student_id: str
     grade: float
     comment: Optional[str] = None
 
 
-class HomeworkGradeCreate(HomeworkGradeBase):
-    pass
-
-
-class HomeworkGradeResponse(HomeworkGradeBase):
+class HomeworkGradeResponse(BaseModel):
     id: str
+    homework_id: str
+    student_id: str
+    grade: float
+    comment: Optional[str] = None
     graded_at: datetime
 
     class Config:
         from_attributes = True
 
 
-class ExamBase(BaseModel):
+class ExamCreate(BaseModel):
     group_subject_id: str
     title: str
     exam_date: datetime
 
 
-class ExamCreate(ExamBase):
-    pass
-
-
-class ExamResponse(ExamBase):
+class ExamResponse(BaseModel):
     id: str
+    group_subject_id: str
+    title: str
+    exam_date: datetime
     created_at: datetime
 
     class Config:
         from_attributes = True
 
 
-class ExamGradeBase(BaseModel):
+class ExamGradeCreate(BaseModel):
     exam_id: str
     student_id: str
     grade: float
     comment: Optional[str] = None
 
 
-class ExamGradeCreate(ExamGradeBase):
-    pass
-
-
-class ExamGradeResponse(ExamGradeBase):
+class ExamGradeResponse(BaseModel):
     id: str
+    exam_id: str
+    student_id: str
+    grade: float
+    comment: Optional[str] = None
     graded_at: datetime
 
     class Config:
@@ -256,7 +225,7 @@ class ExamGradeResponse(ExamGradeBase):
 
 
 # MISC
-class AttendanceBase(BaseModel):
+class AttendanceCreate(BaseModel):
     student_id: str
     group_subject_id: str
     date: datetime
@@ -264,18 +233,19 @@ class AttendanceBase(BaseModel):
     comment: Optional[str] = None
 
 
-class AttendanceCreate(AttendanceBase):
-    pass
-
-
-class AttendanceResponse(AttendanceBase):
+class AttendanceResponse(BaseModel):
     id: str
+    student_id: str
+    group_subject_id: str
+    date: datetime
+    status: str
+    comment: Optional[str] = None
 
     class Config:
         from_attributes = True
 
 
-class PaymentBase(BaseModel):
+class PaymentCreate(BaseModel):
     student_id: str
     month: int
     year: int
@@ -284,38 +254,40 @@ class PaymentBase(BaseModel):
     comment: Optional[str] = None
 
 
-class PaymentCreate(PaymentBase):
-    pass
-
-
-class PaymentResponse(PaymentBase):
+class PaymentResponse(BaseModel):
     id: str
+    student_id: str
+    month: int
+    year: int
+    amount_paid: float
+    is_fully_paid: bool
     paid_at: datetime
+    comment: Optional[str] = None
 
     class Config:
         from_attributes = True
 
 
-class NewsBase(BaseModel):
+class NewsCreate(BaseModel):
     title: str
     body: str
     media_urls: Optional[List[str]] = None
     links: Optional[List[str]] = None
 
 
-class NewsCreate(NewsBase):
-    pass
-
-
-class NewsResponse(NewsBase):
+class NewsResponse(BaseModel):
     id: str
+    title: str
+    body: str
+    media_urls: Optional[List[str]] = None
+    links: Optional[List[str]] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
 
 
-# BULK OPERATIONS
+# BULK GRADING
 class StudentGradeRow(BaseModel):
     student_id: str
     student_name: str
@@ -335,12 +307,6 @@ class ExamGradingTable(BaseModel):
     students: List[StudentGradeRow]
 
 
-class BulkGradeSubmission(BaseModel):
-    homework_id: Optional[str] = None
-    exam_id: Optional[str] = None
-    grades: List[dict]
-
-
 class StudentAttendanceRow(BaseModel):
     student_id: str
     student_name: str
@@ -354,12 +320,6 @@ class AttendanceTable(BaseModel):
     group_name: str
     date: str
     students: List[StudentAttendanceRow]
-
-
-class BulkAttendanceSubmission(BaseModel):
-    group_subject_id: str
-    date: str
-    attendance: List[dict]
 
 
 # RECENT GRADES
@@ -379,35 +339,7 @@ class RecentGradesResponse(BaseModel):
     grades: List[RecentGradeItem]
 
 
-# REPORTS & OPERATIONS
-class StudentEnrollment(BaseModel):
-    student_id: str = Field(..., min_length=1)
-    group_id: str = Field(..., min_length=1)
-
-
-class GroupTransfer(BaseModel):
-    student_ids: List[str] = Field(..., min_items=1)
-    from_group_id: str = Field(..., min_length=1)
-    to_group_id: str = Field(..., min_length=1)
-
-
-class BulkStudentCreate(BaseModel):
-    students: List[dict] = Field(..., min_items=1)
-
-
-class StudentSearch(BaseModel):
-    name: Optional[str] = Field(None, min_length=2)
-    group_id: Optional[str] = None
-    graduation_year: Optional[int] = Field(None, ge=2020, le=2035)
-
-
-class GradeFilter(BaseModel):
-    student_id: Optional[str] = None
-    subject_id: Optional[str] = None
-    date_from: Optional[datetime] = None
-    date_to: Optional[datetime] = None
-
-
+# REPORTS (keeping these as requested)
 class ClassReport(BaseModel):
     group_id: str
     subject_id: str
@@ -425,12 +357,13 @@ class PaymentReport(BaseModel):
     students_unpaid: int = Field(..., ge=0)
 
 
+# PROFILE UPDATE
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = Field(None, min_length=2, max_length=100)
+    avatar_url: Optional[str] = None
+
+
 class FileUpload(BaseModel):
     file_url: str = Field(..., min_length=1)
     file_type: str = Field(..., pattern="^(image|document|video)$")
     file_name: str = Field(..., min_length=1)
-
-
-class PaginationParams(BaseModel):
-    page: int = Field(1, ge=1)
-    size: int = Field(20, ge=1, le=100)

@@ -1,105 +1,91 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+# app/routes/admin.py
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
 from app.dependencies import require_admin
-from app.schemas.schemas import *
+from app.schemas import *
 from app.crud import *
 
 router = APIRouter()
 
 
-# USER MANAGEMENT
-@router.post("/users", response_model=UserResponse)
-def create_user_endpoint(user: UserCreate, db: Session = Depends(get_db), admin=Depends(require_admin)):
-    return create_user(db, user)
+# STUDENT MANAGEMENT
+@router.post("/students", response_model=StudentResponse)
+def create_student_endpoint(student: StudentCreate, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    return create_student(db, student)
 
 
-@router.get("/users/{user_id}", response_model=UserResponse)
-def get_user_endpoint(user_id: str, db: Session = Depends(get_db), admin=Depends(require_admin)):
-    user = get_user(db, user_id)
-    if not user:
-        raise HTTPException(404, "User not found")
-    return user
+@router.get("/students", response_model=List[StudentResponse])
+def get_students_endpoint(db: Session = Depends(get_db), admin=Depends(require_admin)):
+    return get_all_students(db)
 
 
-@router.get("/users", response_model=List[UserResponse])
-def get_users_by_role_endpoint(
-        role: str = None,
-        page: int = Query(1, ge=1),
-        size: int = Query(20, ge=1, le=100),
-        db: Session = Depends(get_db),
-        admin=Depends(require_admin)
-):
-    if role:
-        users = get_users_by_role(db, role)
-    else:
-        users = get_users_by_role(db, "student")
-
-    # Simple pagination
-    start = (page - 1) * size
-    end = start + size
-    return users[start:end]
+@router.get("/students/{student_id}", response_model=StudentResponse)
+def get_student_endpoint(student_id: str, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    student = get_student(db, student_id)
+    if not student:
+        raise HTTPException(404, "Student not found")
+    return student
 
 
-@router.patch("/users/{user_id}")
-def update_user_profile_endpoint(user_id: str, user_update: UserUpdate, db: Session = Depends(get_db),
-                                 admin=Depends(require_admin)):
-    return update_user_profile(db, user_id, user_update)
+@router.delete("/students/{student_id}")
+def delete_student_endpoint(student_id: str, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    if delete_student(db, student_id):
+        return {"deleted": True}
+    raise HTTPException(404, "Student not found")
 
 
-@router.delete("/users/{user_id}")
-def delete_user_endpoint(user_id: str, db: Session = Depends(get_db), admin=Depends(require_admin)):
-    user = get_user(db, user_id)
-    if not user:
-        raise HTTPException(404, "User not found")
-
-    db.delete(user)
-    db.commit()
-    return {"deleted": True}
+# PARENT MANAGEMENT
+@router.post("/parents", response_model=ParentResponse)
+def create_parent_endpoint(parent: ParentCreate, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    return create_parent(db, parent)
 
 
-# PASSWORD MANAGEMENT
-@router.patch("/users/{user_id}/password")
-def admin_change_user_password(
-        user_id: str,
-        password_data: AdminPasswordChange,
-        db: Session = Depends(get_db),
-        admin=Depends(require_admin)
-):
-    from app.utils.password import hash_password
-
-    user = get_user(db, user_id)
-    if not user:
-        raise HTTPException(404, "User not found")
-
-    user.password_hash = hash_password(password_data.new_password)
-    db.commit()
-
-    return {"message": f"Password changed for {user.full_name}"}
+@router.get("/parents", response_model=List[ParentResponse])
+def get_parents_endpoint(db: Session = Depends(get_db), admin=Depends(require_admin)):
+    return get_all_parents(db)
 
 
-@router.post("/users/{user_id}/reset-password")
-def admin_reset_user_password(
-        user_id: str,
-        db: Session = Depends(get_db),
-        admin=Depends(require_admin)
-):
-    import secrets
-    from app.utils.password import hash_password
+@router.get("/parents/{parent_id}", response_model=ParentResponse)
+def get_parent_endpoint(parent_id: str, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    parent = get_parent(db, parent_id)
+    if not parent:
+        raise HTTPException(404, "Parent not found")
+    return parent
 
-    user = get_user(db, user_id)
-    if not user:
-        raise HTTPException(404, "User not found")
 
-    temp_password = secrets.token_urlsafe(8)
-    user.password_hash = hash_password(temp_password)
-    db.commit()
+@router.delete("/parents/{parent_id}")
+def delete_parent_endpoint(parent_id: str, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    if delete_parent(db, parent_id):
+        return {"deleted": True}
+    raise HTTPException(404, "Parent not found")
 
-    return {
-        "message": f"Temporary password generated for {user.full_name}",
-        "temporary_password": temp_password
-    }
+
+# TEACHER MANAGEMENT
+@router.post("/teachers", response_model=TeacherResponse)
+def create_teacher_endpoint(teacher: TeacherCreate, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    return create_teacher(db, teacher)
+
+
+@router.get("/teachers", response_model=List[TeacherResponse])
+def get_teachers_endpoint(db: Session = Depends(get_db), admin=Depends(require_admin)):
+    return get_all_teachers(db)
+
+
+@router.get("/teachers/{teacher_id}", response_model=TeacherResponse)
+def get_teacher_endpoint(teacher_id: str, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    teacher = get_teacher(db, teacher_id)
+    if not teacher:
+        raise HTTPException(404, "Teacher not found")
+    return teacher
+
+
+@router.delete("/teachers/{teacher_id}")
+def delete_teacher_endpoint(teacher_id: str, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    if delete_teacher(db, teacher_id):
+        return {"deleted": True}
+    raise HTTPException(404, "Teacher not found")
 
 
 # GROUP MANAGEMENT
@@ -126,7 +112,6 @@ def delete_group_endpoint(group_id: str, db: Session = Depends(get_db), admin=De
     group = get_group(db, group_id)
     if not group:
         raise HTTPException(404, "Group not found")
-
     db.delete(group)
     db.commit()
     return {"deleted": True}
@@ -149,7 +134,6 @@ def delete_subject_endpoint(subject_id: str, db: Session = Depends(get_db), admi
     subject = db.query(Subject).filter(Subject.id == subject_id).first()
     if not subject:
         raise HTTPException(404, "Subject not found")
-
     db.delete(subject)
     db.commit()
     return {"deleted": True}
@@ -157,8 +141,7 @@ def delete_subject_endpoint(subject_id: str, db: Session = Depends(get_db), admi
 
 # GROUP-SUBJECT MANAGEMENT
 @router.post("/group-subjects", response_model=GroupSubjectResponse)
-def create_group_subject_endpoint(group_subject: GroupSubjectCreate, db: Session = Depends(get_db),
-                                  admin=Depends(require_admin)):
+def create_group_subject_endpoint(group_subject: GroupSubjectCreate, db: Session = Depends(get_db), admin=Depends(require_admin)):
     return create_group_subject(db, group_subject)
 
 
@@ -167,49 +150,10 @@ def get_group_subjects_endpoint(db: Session = Depends(get_db), admin=Depends(req
     return get_all_group_subjects(db)
 
 
-@router.patch("/group-subjects/{group_subject_id}", response_model=GroupSubjectResponse)
-def update_group_subject_endpoint(group_subject_id: str, group_subject: GroupSubjectCreate,
-                                  db: Session = Depends(get_db), admin=Depends(require_admin)):
-    return update_group_subject(db, group_subject_id, group_subject)
-
-
 @router.delete("/group-subjects/{group_subject_id}")
 def delete_group_subject_endpoint(group_subject_id: str, db: Session = Depends(get_db), admin=Depends(require_admin)):
     result = delete_group_subject(db, group_subject_id)
     return {"deleted": result}
-
-
-# STUDENT MANAGEMENT
-@router.post("/students", response_model=StudentResponse)
-def create_student_endpoint(student: StudentCreate, db: Session = Depends(get_db), admin=Depends(require_admin)):
-    return create_student(db, student)
-
-
-@router.post("/students/enroll")
-def enroll_student_endpoint(enrollment: StudentEnrollment, db: Session = Depends(get_db), admin=Depends(require_admin)):
-    return enroll_student_in_group(db, enrollment.student_id, enrollment.group_id)
-
-
-@router.post("/students/transfer")
-def transfer_students_endpoint(transfer: GroupTransfer, db: Session = Depends(get_db), admin=Depends(require_admin)):
-    return bulk_transfer_students(db, transfer.student_ids, transfer.from_group_id, transfer.to_group_id)
-
-
-@router.post("/students/bulk-create")
-def bulk_create_students_endpoint(bulk_data: BulkStudentCreate, db: Session = Depends(get_db),
-                                  admin=Depends(require_admin)):
-    return bulk_create_students(db, bulk_data.students)
-
-
-@router.get("/students/search")
-def search_students_endpoint(
-        name: str = None,
-        group_id: str = None,
-        graduation_year: int = None,
-        db: Session = Depends(get_db),
-        admin=Depends(require_admin)
-):
-    return search_students(db, name, group_id, graduation_year)
 
 
 # PAYMENT MANAGEMENT
@@ -257,16 +201,14 @@ def delete_news_endpoint(news_id: str, db: Session = Depends(get_db), admin=Depe
     news = get_news(db, news_id)
     if not news:
         raise HTTPException(404, "News not found")
-
     db.delete(news)
     db.commit()
     return {"deleted": True}
 
 
-# REPORTS
+# REPORTS (keeping these as requested)
 @router.get("/reports/class")
-def get_class_report_endpoint(group_id: str, subject_id: str, db: Session = Depends(get_db),
-                              admin=Depends(require_admin)):
+def get_class_report_endpoint(group_id: str, subject_id: str, db: Session = Depends(get_db), admin=Depends(require_admin)):
     return get_class_report(db, group_id, subject_id)
 
 

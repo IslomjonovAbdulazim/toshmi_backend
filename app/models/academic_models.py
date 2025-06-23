@@ -1,3 +1,4 @@
+# app/models/academic_models.py
 from sqlalchemy import Column, String, ForeignKey
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -7,7 +8,7 @@ class Group(Base):
     __tablename__ = "groups"
 
     id = Column(String, primary_key=True, index=True)
-    name = Column(String, nullable=False, unique=True, index=True)  # e.g., "10A"
+    name = Column(String, nullable=False, unique=True, index=True)
 
     students = relationship("Student", back_populates="group")
     schedules = relationship("Schedule", back_populates="group")
@@ -18,7 +19,7 @@ class Subject(Base):
     __tablename__ = "subjects"
 
     id = Column(String, primary_key=True, index=True)
-    name = Column(String, nullable=False, unique=True, index=True)  # e.g., "Math"
+    name = Column(String, nullable=False, unique=True, index=True)
 
     group_subjects = relationship("GroupSubject", back_populates="subject")
 
@@ -32,7 +33,6 @@ class GroupSubject(Base):
 
     group = relationship("Group", back_populates="group_subjects")
     subject = relationship("Subject", back_populates="group_subjects")
-    teachers = relationship("Teacher", secondary="teacher_group_subjects", back_populates="group_subjects")
 
     # Back references
     homework = relationship("Homework", back_populates="group_subject")
@@ -47,9 +47,9 @@ class Schedule(Base):
     id = Column(String, primary_key=True, index=True)
     group_id = Column(String, ForeignKey("groups.id"), nullable=False, index=True)
     group_subject_id = Column(String, ForeignKey("group_subjects.id"), nullable=False, index=True)
-    day_of_week = Column(String, nullable=False, index=True)  # 'monday', 'tuesday', etc.
-    start_time = Column(String, nullable=False)  # e.g., "08:30"
-    end_time = Column(String, nullable=False)  # e.g., "09:15"
+    day_of_week = Column(String, nullable=False, index=True)
+    start_time = Column(String, nullable=False)
+    end_time = Column(String, nullable=False)
     room = Column(String, nullable=True)
 
     group = relationship("Group", back_populates="schedules")

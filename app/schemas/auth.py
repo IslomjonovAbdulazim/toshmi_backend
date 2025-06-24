@@ -1,10 +1,11 @@
 # app/schemas/auth.py
 """
-Authentication-related Pydantic schemas
-Built with passion for secure and validated data handling!
+Authentication-related Pydantic schemas - FIXED VERSION
+Resolved circular reference issues with proper model configuration
 """
 
-from pydantic import BaseModel, Field, validator
+from __future__ import annotations
+from pydantic import BaseModel, Field, validator, ConfigDict
 from typing import Optional
 from datetime import datetime
 from ..utils.helpers import UserRole
@@ -24,26 +25,16 @@ class LoginRequest(BaseModel):
             raise ValueError("Phone number must be between 9-15 digits")
         return v
 
-    class Config:
-        schema_extra = {
-            "example": {
-                "phone": 998901234567,
-                "role": "student",
-                "password": "password123"
-            }
-        }
-
 
 class UserInfo(BaseModel):
     """User information in token response"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: str = Field(..., description="User ID")
     role: UserRole = Field(..., description="User role")
     phone: int = Field(..., description="Phone number")
     full_name: str = Field(..., description="Full name")
     avatar_url: Optional[str] = Field(None, description="Avatar URL")
-
-    class Config:
-        from_attributes = True
 
 
 class TokenResponse(BaseModel):
@@ -52,22 +43,6 @@ class TokenResponse(BaseModel):
     token_type: str = Field(default="bearer", description="Token type")
     expires_in: int = Field(..., description="Token expiration time in seconds")
     user: UserInfo = Field(..., description="User information")
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-                "token_type": "bearer",
-                "expires_in": 1800,
-                "user": {
-                    "id": "uuid-string",
-                    "role": "student",
-                    "phone": 998901234567,
-                    "full_name": "John Doe",
-                    "avatar_url": None
-                }
-            }
-        }
 
 
 class ChangePasswordRequest(BaseModel):
@@ -98,15 +73,6 @@ class ChangePasswordRequest(BaseModel):
 
         return v
 
-    class Config:
-        schema_extra = {
-            "example": {
-                "current_password": "oldpassword123",
-                "new_password": "NewPassword123",
-                "confirm_password": "NewPassword123"
-            }
-        }
-
 
 class ResetPasswordRequest(BaseModel):
     """Reset password request schema (admin only)"""
@@ -129,15 +95,6 @@ class ResetPasswordRequest(BaseModel):
             raise ValueError('Password must be at least 8 characters long')
         return v
 
-    class Config:
-        schema_extra = {
-            "example": {
-                "phone": 998901234567,
-                "role": "student",
-                "new_password": "NewPassword123"
-            }
-        }
-
 
 class UpdateProfileRequest(BaseModel):
     """Update profile request schema"""
@@ -152,16 +109,11 @@ class UpdateProfileRequest(BaseModel):
                 raise ValueError('Full name must be at least 2 characters long')
         return v
 
-    class Config:
-        schema_extra = {
-            "example": {
-                "full_name": "John Smith"
-            }
-        }
-
 
 class ProfileResponse(BaseModel):
     """Profile response schema"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: str = Field(..., description="User ID")
     role: UserRole = Field(..., description="User role")
     phone: int = Field(..., description="Phone number")
@@ -171,34 +123,11 @@ class ProfileResponse(BaseModel):
     updated_at: datetime = Field(..., description="Last update date")
     is_active: bool = Field(..., description="Account status")
 
-    class Config:
-        from_attributes = True
-        schema_extra = {
-            "example": {
-                "id": "uuid-string",
-                "role": "student",
-                "phone": 998901234567,
-                "full_name": "John Doe",
-                "avatar_url": "/uploads/profiles/uuid.jpg",
-                "created_at": "2024-01-15T10:30:00Z",
-                "updated_at": "2024-01-15T10:30:00Z",
-                "is_active": True
-            }
-        }
-
 
 class LogoutResponse(BaseModel):
     """Logout response schema"""
     message: str = Field(default="Successfully logged out", description="Logout message")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Logout timestamp")
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "message": "Successfully logged out",
-                "timestamp": "2024-01-15T10:30:00Z"
-            }
-        }
 
 
 class AuthErrorResponse(BaseModel):
@@ -207,15 +136,6 @@ class AuthErrorResponse(BaseModel):
     code: str = Field(default="AUTH_ERROR", description="Error code")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Error timestamp")
 
-    class Config:
-        schema_extra = {
-            "example": {
-                "detail": "Invalid credentials",
-                "code": "INVALID_CREDENTIALS",
-                "timestamp": "2024-01-15T10:30:00Z"
-            }
-        }
-
 
 class TokenValidationResponse(BaseModel):
     """Token validation response schema"""
@@ -223,13 +143,3 @@ class TokenValidationResponse(BaseModel):
     user_id: Optional[str] = Field(None, description="User ID if valid")
     role: Optional[UserRole] = Field(None, description="User role if valid")
     expires_at: Optional[datetime] = Field(None, description="Token expiration time")
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "valid": True,
-                "user_id": "uuid-string",
-                "role": "student",
-                "expires_at": "2024-01-15T11:00:00Z"
-            }
-        }

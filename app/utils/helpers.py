@@ -1,6 +1,6 @@
 # app/utils/helpers.py
 """
-Helper functions and constants for the Education Center Management System
+Helper functions and constants for the Education Center Management System - FIXED VERSION
 Crafted with passion for clean, reusable, and efficient code!
 """
 

@@ -1,13 +1,19 @@
 # app/schemas/users.py
 """
-User management Pydantic schemas
-Created with passion for comprehensive user data validation!
+User management Pydantic schemas - FIXED VERSION
+Resolved circular reference issues with proper forward references and model configuration
 """
 
-from pydantic import BaseModel, Field, validator
-from typing import Optional, List
+from __future__ import annotations
+from pydantic import BaseModel, Field, validator, ConfigDict
+from typing import Optional, List, ForwardRef
 from datetime import datetime
 from ..utils.helpers import UserRole
+
+# Forward references to avoid circular imports
+StudentResponse = ForwardRef('StudentResponse')
+ParentResponse = ForwardRef('ParentResponse')
+TeacherResponse = ForwardRef('TeacherResponse')
 
 
 # Base User Schemas
@@ -48,6 +54,8 @@ class UserCreate(UserBase):
 
 class UserResponse(BaseModel):
     """User response schema"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: str = Field(..., description="User ID")
     role: UserRole = Field(..., description="User role")
     phone: int = Field(..., description="Phone number")
@@ -56,9 +64,6 @@ class UserResponse(BaseModel):
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     is_active: bool = Field(..., description="Account status")
-
-    class Config:
-        from_attributes = True
 
 
 class UserUpdate(BaseModel):
@@ -92,18 +97,6 @@ class StudentCreate(UserCreate):
             raise ValueError(f'Graduation year must be between {current_year} and {current_year + 10}')
         return v
 
-    class Config:
-        schema_extra = {
-            "example": {
-                "phone": 998901234567,
-                "full_name": "John Doe",
-                "password": "password123",
-                "group_id": "group-uuid",
-                "parent_id": "parent-uuid",
-                "graduation_year": 2025
-            }
-        }
-
 
 class StudentUpdate(BaseModel):
     """Schema for updating students"""
@@ -116,6 +109,8 @@ class StudentUpdate(BaseModel):
 
 class StudentResponse(BaseModel):
     """Student response schema"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: str = Field(..., description="Student ID")
     user_id: str = Field(..., description="User ID")
     group_id: str = Field(..., description="Group ID")
@@ -125,23 +120,12 @@ class StudentResponse(BaseModel):
     updated_at: datetime = Field(..., description="Last update timestamp")
     user: UserResponse = Field(..., description="User information")
 
-    class Config:
-        from_attributes = True
-
 
 # Parent Schemas
 
 class ParentCreate(UserCreate):
     """Schema for creating parents"""
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "phone": 998907654321,
-                "full_name": "Jane Smith",
-                "password": "password123"
-            }
-        }
+    pass
 
 
 class ParentUpdate(BaseModel):
@@ -152,34 +136,25 @@ class ParentUpdate(BaseModel):
 
 class ParentResponse(BaseModel):
     """Parent response schema"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: str = Field(..., description="Parent ID")
     user_id: str = Field(..., description="User ID")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     user: UserResponse = Field(..., description="User information")
 
-    class Config:
-        from_attributes = True
-
 
 class ParentWithChildren(ParentResponse):
-    """Parent response with children"""
-    children: List[StudentResponse] = Field(default=[], description="List of children")
+    """Parent response with children - using List without forward ref"""
+    children: List[dict] = Field(default=[], description="List of children (simplified)")
 
 
 # Teacher Schemas
 
 class TeacherCreate(UserCreate):
     """Schema for creating teachers"""
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "phone": 998905555555,
-                "full_name": "Dr. Emily Johnson",
-                "password": "password123"
-            }
-        }
+    pass
 
 
 class TeacherUpdate(BaseModel):
@@ -190,14 +165,13 @@ class TeacherUpdate(BaseModel):
 
 class TeacherResponse(BaseModel):
     """Teacher response schema"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: str = Field(..., description="Teacher ID")
     user_id: str = Field(..., description="User ID")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     user: UserResponse = Field(..., description="User information")
-
-    class Config:
-        from_attributes = True
 
 
 # Assignment Schemas
@@ -206,24 +180,10 @@ class AssignParentRequest(BaseModel):
     """Schema for assigning parent to student"""
     parent_id: str = Field(..., description="Parent ID to assign")
 
-    class Config:
-        schema_extra = {
-            "example": {
-                "parent_id": "parent-uuid"
-            }
-        }
-
 
 class ChangeGroupRequest(BaseModel):
     """Schema for changing student's group"""
     group_id: str = Field(..., description="New group ID")
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "group_id": "new-group-uuid"
-            }
-        }
 
 
 # List Schemas
@@ -285,6 +245,27 @@ class StudentSearchRequest(BaseModel):
     size: int = Field(default=20, ge=1, le=100, description="Page size")
 
 
+# Success Response Schemas
+
+class UserCreatedResponse(BaseModel):
+    """User creation success response"""
+    message: str = Field(default="User created successfully", description="Success message")
+    user_id: str = Field(..., description="Created user ID")
+    credentials: dict = Field(..., description="Login credentials")
+
+
+class UserUpdatedResponse(BaseModel):
+    """User update success response"""
+    message: str = Field(default="User updated successfully", description="Success message")
+    user: UserResponse = Field(..., description="Updated user information")
+
+
+class UserDeletedResponse(BaseModel):
+    """User deletion success response"""
+    message: str = Field(default="User deleted successfully", description="Success message")
+    user_id: str = Field(..., description="Deleted user ID")
+
+
 # Profile Management Schemas
 
 class ProfilePictureResponse(BaseModel):
@@ -301,47 +282,8 @@ class UserStatsResponse(BaseModel):
     total_parents: int = Field(..., description="Total number of parents")
     active_users: int = Field(..., description="Number of active users")
 
-    class Config:
-        schema_extra = {
-            "example": {
-                "total_users": 150,
-                "total_students": 100,
-                "total_teachers": 20,
-                "total_parents": 80,
-                "active_users": 145
-            }
-        }
 
-
-# Success Response Schemas
-
-class UserCreatedResponse(BaseModel):
-    """User creation success response"""
-    message: str = Field(default="User created successfully", description="Success message")
-    user_id: str = Field(..., description="Created user ID")
-    credentials: dict = Field(..., description="Login credentials")
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "message": "Student created successfully",
-                "user_id": "uuid-string",
-                "credentials": {
-                    "phone": 998901234567,
-                    "password": "generated-password",
-                    "role": "student"
-                }
-            }
-        }
-
-
-class UserUpdatedResponse(BaseModel):
-    """User update success response"""
-    message: str = Field(default="User updated successfully", description="Success message")
-    user: UserResponse = Field(..., description="Updated user information")
-
-
-class UserDeletedResponse(BaseModel):
-    """User deletion success response"""
-    message: str = Field(default="User deleted successfully", description="Success message")
-    user_id: str = Field(..., description="Deleted user ID")
+# Update forward references
+StudentResponse.model_rebuild()
+ParentResponse.model_rebuild()
+TeacherResponse.model_rebuild()

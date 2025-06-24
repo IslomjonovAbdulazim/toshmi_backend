@@ -36,6 +36,7 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     is_active = Column(Boolean, default=True)
 
+
     # Unique constraint for role + phone combination
     __table_args__ = (
         UniqueConstraint('role', 'phone', name='unique_role_phone'),
@@ -47,7 +48,7 @@ class User(Base):
     parent_profile = relationship("Parent", back_populates="user", uselist=False)
     teacher_profile = relationship("Teacher", back_populates="user", uselist=False)
     notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
-    files = relationship("File", back_populates="uploaded_by_user", cascade="all, delete-orphan")
+    files = relationship("File", back_populates="uploaded_by_user", foreign_keys="File.uploaded_by", cascade="all, delete-orphan")
 
 
 class Group(Base):

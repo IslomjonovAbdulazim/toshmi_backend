@@ -11,21 +11,25 @@ from app.core.config import settings
 router = APIRouter()
 
 
-def save_file(file: UploadFile, file_type: str, related_id: int, current_user: User, db: Session):
-    if file_type == "profile" and file.size > settings.MAX_IMAGE_SIZE:
-        raise HTTPException(status_code=413, detail="Profile image too large")
-    elif file.size > settings.MAX_FILE_SIZE:
+def validate_file_size(file: UploadFile, file_type: str):
+    max_size = settings.MAX_IMAGE_SIZE if file_type == "profile" else settings.MAX_FILE_SIZE
+    if file.size > max_size:
         raise HTTPException(status_code=413, detail="File too large")
+
+
+def get_file_path(file_type: str, filename: str):
+    subfolder = "images" if file_type == "profile" else "documents"
+    file_path = os.path.join(settings.UPLOAD_DIR, subfolder, filename)
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    return file_path
+
+
+def save_file(file: UploadFile, file_type: str, related_id: int, current_user: User, db: Session):
+    validate_file_size(file, file_type)
 
     file_extension = file.filename.split(".")[-1] if "." in file.filename else ""
     unique_filename = f"{uuid.uuid4()}.{file_extension}"
-
-    if file_type == "profile":
-        file_path = os.path.join(settings.UPLOAD_DIR, "images", unique_filename)
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    else:
-        file_path = os.path.join(settings.UPLOAD_DIR, "documents", unique_filename)
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    file_path = get_file_path(file_type, unique_filename)
 
     with open(file_path, "wb") as buffer:
         buffer.write(file.file.read())
@@ -40,18 +44,38 @@ def save_file(file: UploadFile, file_type: str, related_id: int, current_user: U
     )
     db.add(db_file)
     db.commit()
-
     return db_file
+
+
+def delete_old_file(file_id: int, db: Session):
+    if file_id:
+        old_file = db.query(File).filter(File.id == file_id).first()
+        if old_file:
+            if os.path.exists(old_file.file_path):
+                os.remove(old_file.file_path)
+            db.delete(old_file)
+
+
+def add_file_to_list(entity, file_id: int, field_name: str, max_count: int):
+    file_list = getattr(entity, field_name) or []
+    if len(file_list) >= max_count:
+        raise HTTPException(status_code=400, detail=f"Maximum {max_count} files allowed")
+
+    file_list.append(file_id)
+    setattr(entity, field_name, file_list)
+
+
+def remove_file_from_list(entity, file_id: int, field_name: str):
+    file_list = getattr(entity, field_name) or []
+    if file_id in file_list:
+        file_list.remove(file_id)
+        setattr(entity, field_name, file_list)
 
 
 @router.post("/profile-picture")
 def upload_profile_picture(file: UploadFile = FastAPIFile(...), current_user: User = Depends(get_current_user),
                            db: Session = Depends(get_db)):
-    if current_user.profile_image_id:
-        old_file = db.query(File).filter(File.id == current_user.profile_image_id).first()
-        if old_file and os.path.exists(old_file.file_path):
-            os.remove(old_file.file_path)
-        db.delete(old_file)
+    delete_old_file(current_user.profile_image_id, db)
 
     new_file = save_file(file, "profile", current_user.id, current_user, db)
     current_user.profile_image_id = new_file.id
@@ -63,18 +87,16 @@ def upload_profile_picture(file: UploadFile = FastAPIFile(...), current_user: Us
 @router.post("/homework/{homework_id}/upload")
 def upload_homework_file(homework_id: int, file: UploadFile = FastAPIFile(...),
                          current_user: User = Depends(require_role(["teacher"])), db: Session = Depends(get_db)):
-    homework = db.query(Homework).filter(Homework.id == homework_id).first()
+    homework = db.query(Homework).join(Homework.group_subject).filter(
+        Homework.id == homework_id,
+        Homework.group_subject.has(teacher_id=current_user.id)
+    ).first()
+
     if not homework:
         raise HTTPException(status_code=404, detail="Homework not found")
 
-    if len(homework.document_ids) >= 3:
-        raise HTTPException(status_code=400, detail="Maximum 3 documents allowed")
-
     new_file = save_file(file, "homework", homework_id, current_user, db)
-
-    document_ids = homework.document_ids or []
-    document_ids.append(new_file.id)
-    homework.document_ids = document_ids
+    add_file_to_list(homework, new_file.id, "document_ids", 3)
     db.commit()
 
     return {"message": "File uploaded", "file_id": new_file.id}
@@ -83,18 +105,16 @@ def upload_homework_file(homework_id: int, file: UploadFile = FastAPIFile(...),
 @router.post("/exam/{exam_id}/upload")
 def upload_exam_file(exam_id: int, file: UploadFile = FastAPIFile(...),
                      current_user: User = Depends(require_role(["teacher"])), db: Session = Depends(get_db)):
-    exam = db.query(Exam).filter(Exam.id == exam_id).first()
+    exam = db.query(Exam).join(Exam.group_subject).filter(
+        Exam.id == exam_id,
+        Exam.group_subject.has(teacher_id=current_user.id)
+    ).first()
+
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
 
-    if len(exam.document_ids) >= 3:
-        raise HTTPException(status_code=400, detail="Maximum 3 documents allowed")
-
     new_file = save_file(file, "exam", exam_id, current_user, db)
-
-    document_ids = exam.document_ids or []
-    document_ids.append(new_file.id)
-    exam.document_ids = document_ids
+    add_file_to_list(exam, new_file.id, "document_ids", 3)
     db.commit()
 
     return {"message": "File uploaded", "file_id": new_file.id}
@@ -107,14 +127,8 @@ def upload_news_image(news_id: int, file: UploadFile = FastAPIFile(...),
     if not news:
         raise HTTPException(status_code=404, detail="News not found")
 
-    if len(news.image_ids) >= 3:
-        raise HTTPException(status_code=400, detail="Maximum 3 images allowed")
-
     new_file = save_file(file, "news", news_id, current_user, db)
-
-    image_ids = news.image_ids or []
-    image_ids.append(new_file.id)
-    news.image_ids = image_ids
+    add_file_to_list(news, new_file.id, "image_ids", 3)
     db.commit()
 
     return {"message": "Image uploaded", "file_id": new_file.id}
@@ -143,16 +157,16 @@ def delete_file(file_id: int, current_user: User = Depends(get_current_user), db
 
     if file.file_type == "homework":
         homework = db.query(Homework).filter(Homework.id == file.related_id).first()
-        if homework and file_id in homework.document_ids:
-            homework.document_ids.remove(file_id)
+        if homework:
+            remove_file_from_list(homework, file_id, "document_ids")
     elif file.file_type == "exam":
         exam = db.query(Exam).filter(Exam.id == file.related_id).first()
-        if exam and file_id in exam.document_ids:
-            exam.document_ids.remove(file_id)
+        if exam:
+            remove_file_from_list(exam, file_id, "document_ids")
     elif file.file_type == "news":
         news = db.query(News).filter(News.id == file.related_id).first()
-        if news and file_id in news.image_ids:
-            news.image_ids.remove(file_id)
+        if news:
+            remove_file_from_list(news, file_id, "image_ids")
 
     if os.path.exists(file.file_path):
         os.remove(file.file_path)

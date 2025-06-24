@@ -17,6 +17,15 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     profile_image_id = Column(Integer, ForeignKey("files.id"), nullable=True)
 
+    profile_image = relationship("File", foreign_keys=[profile_image_id])
+    student_profile = relationship("Student", back_populates="user", uselist=False)
+    group_subjects = relationship("GroupSubject", back_populates="teacher")
+    news_authored = relationship("News", back_populates="author")
+
+    @property
+    def full_name(self):
+        return f"{self.first_name} {self.last_name}"
+
 
 class Group(Base):
     __tablename__ = "groups"
@@ -25,6 +34,9 @@ class Group(Base):
     name = Column(String)
     academic_year = Column(String)
 
+    students = relationship("Student", back_populates="group")
+    group_subjects = relationship("GroupSubject", back_populates="group")
+
 
 class Subject(Base):
     __tablename__ = "subjects"
@@ -32,6 +44,8 @@ class Subject(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String)
     code = Column(String, unique=True)
+
+    group_subjects = relationship("GroupSubject", back_populates="subject")
 
 
 class Student(Base):
@@ -43,6 +57,14 @@ class Student(Base):
     parent_phone = Column(String)
     graduation_year = Column(Integer)
 
+    user = relationship("User", back_populates="student_profile")
+    group = relationship("Group", back_populates="students")
+    homework_grades = relationship("HomeworkGrade", back_populates="student")
+    exam_grades = relationship("ExamGrade", back_populates="student")
+    attendance_records = relationship("Attendance", back_populates="student")
+    payment_records = relationship("PaymentRecord", back_populates="student")
+    monthly_payments = relationship("MonthlyPayment", back_populates="student")
+
 
 class GroupSubject(Base):
     __tablename__ = "group_subjects"
@@ -51,6 +73,14 @@ class GroupSubject(Base):
     group_id = Column(Integer, ForeignKey("groups.id"))
     subject_id = Column(Integer, ForeignKey("subjects.id"))
     teacher_id = Column(Integer, ForeignKey("users.id"))
+
+    group = relationship("Group", back_populates="group_subjects")
+    subject = relationship("Subject", back_populates="group_subjects")
+    teacher = relationship("User", back_populates="group_subjects")
+    homework = relationship("Homework", back_populates="group_subject")
+    exams = relationship("Exam", back_populates="group_subject")
+    attendance_records = relationship("Attendance", back_populates="group_subject")
+    schedules = relationship("Schedule", back_populates="group_subject")
 
 
 class Homework(Base):
@@ -66,6 +96,9 @@ class Homework(Base):
     document_ids = Column(JSON, default=list)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    group_subject = relationship("GroupSubject", back_populates="homework")
+    grades = relationship("HomeworkGrade", back_populates="homework")
+
 
 class Exam(Base):
     __tablename__ = "exams"
@@ -80,6 +113,9 @@ class Exam(Base):
     document_ids = Column(JSON, default=list)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    group_subject = relationship("GroupSubject", back_populates="exams")
+    grades = relationship("ExamGrade", back_populates="exam")
+
 
 class HomeworkGrade(Base):
     __tablename__ = "homework_grades"
@@ -90,6 +126,9 @@ class HomeworkGrade(Base):
     points = Column(Integer)
     comment = Column(Text, default="")
     graded_at = Column(DateTime, default=datetime.utcnow)
+
+    student = relationship("Student", back_populates="homework_grades")
+    homework = relationship("Homework", back_populates="grades")
 
 
 class ExamGrade(Base):
@@ -102,6 +141,9 @@ class ExamGrade(Base):
     comment = Column(Text, default="")
     graded_at = Column(DateTime, default=datetime.utcnow)
 
+    student = relationship("Student", back_populates="exam_grades")
+    exam = relationship("Exam", back_populates="grades")
+
 
 class Attendance(Base):
     __tablename__ = "attendance"
@@ -111,6 +153,9 @@ class Attendance(Base):
     group_subject_id = Column(Integer, ForeignKey("group_subjects.id"))
     date = Column(Date)
     status = Column(String)
+
+    student = relationship("Student", back_populates="attendance_records")
+    group_subject = relationship("GroupSubject", back_populates="attendance_records")
 
 
 class PaymentRecord(Base):
@@ -123,6 +168,8 @@ class PaymentRecord(Base):
     payment_method = Column(String, default="cash")
     description = Column(String, default="")
 
+    student = relationship("Student", back_populates="payment_records")
+
 
 class MonthlyPayment(Base):
     __tablename__ = "monthly_payments"
@@ -134,6 +181,8 @@ class MonthlyPayment(Base):
     paid_amount = Column(Integer, default=0)
     is_completed = Column(Boolean, default=False)
     due_date = Column(Date)
+
+    student = relationship("Student", back_populates="monthly_payments")
 
 
 class News(Base):
@@ -148,6 +197,8 @@ class News(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     is_published = Column(Boolean, default=True)
 
+    author = relationship("User", back_populates="news_authored")
+
 
 class File(Base):
     __tablename__ = "files"
@@ -161,6 +212,8 @@ class File(Base):
     related_id = Column(Integer)
     file_type = Column(String)
 
+    uploader = relationship("User", foreign_keys=[uploaded_by])
+
 
 class Schedule(Base):
     __tablename__ = "schedules"
@@ -171,3 +224,5 @@ class Schedule(Base):
     start_time = Column(Time)
     end_time = Column(Time)
     room = Column(String)
+
+    group_subject = relationship("GroupSubject", back_populates="schedules")

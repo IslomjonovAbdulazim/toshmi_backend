@@ -6,8 +6,8 @@ class Settings(BaseSettings):
     JWT_SECRET: str
     JWT_EXPIRE_MINUTES: int = 30
     UPLOAD_DIR: str = "uploads"
-    MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
-    MAX_IMAGE_SIZE: int = 3 * 1024 * 1024  # 3MB
+    MAX_FILE_SIZE: int = 10 * 1024 * 1024
+    MAX_IMAGE_SIZE: int = 3 * 1024 * 1024
 
     class Config:
         env_file = ".env"

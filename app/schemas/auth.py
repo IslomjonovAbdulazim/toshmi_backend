@@ -34,12 +34,24 @@ class LoginRequest(BaseModel):
         }
 
 
+class UserInfo(BaseModel):
+    """User information in token response"""
+    id: str = Field(..., description="User ID")
+    role: UserRole = Field(..., description="User role")
+    phone: int = Field(..., description="Phone number")
+    full_name: str = Field(..., description="Full name")
+    avatar_url: Optional[str] = Field(None, description="Avatar URL")
+
+    class Config:
+        from_attributes = True
+
+
 class TokenResponse(BaseModel):
     """Token response schema"""
     access_token: str = Field(..., description="JWT access token")
     token_type: str = Field(default="bearer", description="Token type")
     expires_in: int = Field(..., description="Token expiration time in seconds")
-    user: "UserInfo" = Field(..., description="User information")
+    user: UserInfo = Field(..., description="User information")
 
     class Config:
         schema_extra = {
@@ -56,18 +68,6 @@ class TokenResponse(BaseModel):
                 }
             }
         }
-
-
-class UserInfo(BaseModel):
-    """User information in token response"""
-    id: str = Field(..., description="User ID")
-    role: UserRole = Field(..., description="User role")
-    phone: int = Field(..., description="Phone number")
-    full_name: str = Field(..., description="Full name")
-    avatar_url: Optional[str] = Field(None, description="Avatar URL")
-
-    class Config:
-        from_attributes = True
 
 
 class ChangePasswordRequest(BaseModel):
@@ -233,7 +233,3 @@ class TokenValidationResponse(BaseModel):
                 "expires_at": "2024-01-15T11:00:00Z"
             }
         }
-
-
-# Forward reference resolution
-TokenResponse.model_rebuild()

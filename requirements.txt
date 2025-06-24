@@ -9,7 +9,6 @@ pydantic==2.5.0
 pydantic-settings==2.1.0
 python-dotenv==1.0.0
 pillow==10.1.0
-python-magic==0.4.27
 alembic==1.13.0
 pytest==7.4.3
 pytest-asyncio==0.21.1
@@ -19,7 +18,7 @@ black==23.12.1
 isort==5.13.2
 flake8==7.0.0
 
-# System dependencies (install separately):
-# Ubuntu/Debian: sudo apt-get install libmagic1
-# CentOS/RHEL: sudo yum install file-devel
+# System dependencies notes:
+# Ubuntu/Debian: sudo apt-get install libmagic1 python3-dev
+# CentOS/RHEL: sudo yum install file-devel python3-devel
 # macOS: brew install libmagic

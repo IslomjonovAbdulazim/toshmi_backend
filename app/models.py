@@ -4,8 +4,7 @@ Complete SQLAlchemy models for Education Center Management System
 Designed with passion for clean, efficient, and scalable data structure!
 """
 
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, Text, ForeignKey, Float, Date, UniqueConstraint, \
-    Index
+from sqlalchemy import Column, String, Integer, Boolean, DateTime, Text, ForeignKey, Float, Date, UniqueConstraint, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -36,19 +35,18 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     is_active = Column(Boolean, default=True)
 
-
     # Unique constraint for role + phone combination
     __table_args__ = (
         UniqueConstraint('role', 'phone', name='unique_role_phone'),
         Index('idx_user_role_phone', 'role', 'phone'),
     )
 
-    # Relationships
-    student_profile = relationship("Student", back_populates="user", uselist=False)
-    parent_profile = relationship("Parent", back_populates="user", uselist=False)
-    teacher_profile = relationship("Teacher", back_populates="user", uselist=False)
-    notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
-    files = relationship("File", back_populates="uploaded_by_user", foreign_keys="File.uploaded_by", cascade="all, delete-orphan")
+    # Relationships - using lazy loading to avoid circular references
+    student_profile = relationship("Student", back_populates="user", uselist=False, lazy="select")
+    parent_profile = relationship("Parent", back_populates="user", uselist=False, lazy="select")
+    teacher_profile = relationship("Teacher", back_populates="user", uselist=False, lazy="select")
+    notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan", lazy="select")
+    files = relationship("File", back_populates="uploaded_by_user", foreign_keys="File.uploaded_by", cascade="all, delete-orphan", lazy="select")
 
 
 class Group(Base):
@@ -63,11 +61,11 @@ class Group(Base):
     is_active = Column(Boolean, default=True)
 
     # Relationships
-    students = relationship("Student", back_populates="group")
-    group_subjects = relationship("GroupSubject", back_populates="group", cascade="all, delete-orphan")
-    schedules = relationship("Schedule", back_populates="group", cascade="all, delete-orphan")
-    homework = relationship("Homework", back_populates="group", cascade="all, delete-orphan")
-    exams = relationship("Exam", back_populates="group", cascade="all, delete-orphan")
+    students = relationship("Student", back_populates="group", lazy="select")
+    group_subjects = relationship("GroupSubject", back_populates="group", cascade="all, delete-orphan", lazy="select")
+    schedules = relationship("Schedule", back_populates="group", cascade="all, delete-orphan", lazy="select")
+    homework = relationship("Homework", back_populates="group", cascade="all, delete-orphan", lazy="select")
+    exams = relationship("Exam", back_populates="group", cascade="all, delete-orphan", lazy="select")
 
 
 class Subject(Base):
@@ -82,10 +80,10 @@ class Subject(Base):
     is_active = Column(Boolean, default=True)
 
     # Relationships
-    group_subjects = relationship("GroupSubject", back_populates="subject", cascade="all, delete-orphan")
-    schedules = relationship("Schedule", back_populates="subject", cascade="all, delete-orphan")
-    homework = relationship("Homework", back_populates="subject", cascade="all, delete-orphan")
-    exams = relationship("Exam", back_populates="subject", cascade="all, delete-orphan")
+    group_subjects = relationship("GroupSubject", back_populates="subject", cascade="all, delete-orphan", lazy="select")
+    schedules = relationship("Schedule", back_populates="subject", cascade="all, delete-orphan", lazy="select")
+    homework = relationship("Homework", back_populates="subject", cascade="all, delete-orphan", lazy="select")
+    exams = relationship("Exam", back_populates="subject", cascade="all, delete-orphan", lazy="select")
 
 
 class Student(Base):
@@ -101,14 +99,13 @@ class Student(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    user = relationship("User", back_populates="student_profile")
-    group = relationship("Group", back_populates="students")
-    parent = relationship("Parent", back_populates="students")
-    grades = relationship("Grade", back_populates="student", cascade="all, delete-orphan")
-    attendance_records = relationship("Attendance", back_populates="student", cascade="all, delete-orphan")
-    payments = relationship("Payment", back_populates="student", cascade="all, delete-orphan")
-    monthly_payment_status = relationship("MonthlyPaymentStatus", back_populates="student",
-                                          cascade="all, delete-orphan")
+    user = relationship("User", back_populates="student_profile", lazy="joined")
+    group = relationship("Group", back_populates="students", lazy="joined")
+    parent = relationship("Parent", back_populates="students", lazy="select")
+    grades = relationship("Grade", back_populates="student", cascade="all, delete-orphan", lazy="select")
+    attendance_records = relationship("Attendance", back_populates="student", cascade="all, delete-orphan", lazy="select")
+    payments = relationship("Payment", back_populates="student", cascade="all, delete-orphan", lazy="select")
+    monthly_payment_status = relationship("MonthlyPaymentStatus", back_populates="student", cascade="all, delete-orphan", lazy="select")
 
 
 class Parent(Base):
@@ -121,8 +118,8 @@ class Parent(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    user = relationship("User", back_populates="parent_profile")
-    students = relationship("Student", back_populates="parent")
+    user = relationship("User", back_populates="parent_profile", lazy="joined")
+    students = relationship("Student", back_populates="parent", lazy="select")
 
 
 class Teacher(Base):
@@ -135,13 +132,13 @@ class Teacher(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    user = relationship("User", back_populates="teacher_profile")
-    group_subjects = relationship("GroupSubject", back_populates="teacher")
-    schedules = relationship("Schedule", back_populates="teacher")
-    homework = relationship("Homework", back_populates="teacher")
-    exams = relationship("Exam", back_populates="teacher")
-    grades_given = relationship("Grade", back_populates="graded_by_teacher")
-    attendance_recorded = relationship("Attendance", back_populates="teacher")
+    user = relationship("User", back_populates="teacher_profile", lazy="joined")
+    group_subjects = relationship("GroupSubject", back_populates="teacher", lazy="select")
+    schedules = relationship("Schedule", back_populates="teacher", lazy="select")
+    homework = relationship("Homework", back_populates="teacher", lazy="select")
+    exams = relationship("Exam", back_populates="teacher", lazy="select")
+    grades_given = relationship("Grade", back_populates="graded_by_teacher", lazy="select")
+    attendance_recorded = relationship("Attendance", back_populates="teacher", lazy="select")
 
 
 class GroupSubject(Base):
@@ -162,9 +159,9 @@ class GroupSubject(Base):
     )
 
     # Relationships
-    group = relationship("Group", back_populates="group_subjects")
-    subject = relationship("Subject", back_populates="group_subjects")
-    teacher = relationship("Teacher", back_populates="group_subjects")
+    group = relationship("Group", back_populates="group_subjects", lazy="joined")
+    subject = relationship("Subject", back_populates="group_subjects", lazy="joined")
+    teacher = relationship("Teacher", back_populates="group_subjects", lazy="joined")
 
 
 class Schedule(Base):
@@ -188,9 +185,9 @@ class Schedule(Base):
     )
 
     # Relationships
-    group = relationship("Group", back_populates="schedules")
-    subject = relationship("Subject", back_populates="schedules")
-    teacher = relationship("Teacher", back_populates="schedules")
+    group = relationship("Group", back_populates="schedules", lazy="joined")
+    subject = relationship("Subject", back_populates="schedules", lazy="joined")
+    teacher = relationship("Teacher", back_populates="schedules", lazy="joined")
 
 
 class Homework(Base):
@@ -209,11 +206,11 @@ class Homework(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    group = relationship("Group", back_populates="homework")
-    subject = relationship("Subject", back_populates="homework")
-    teacher = relationship("Teacher", back_populates="homework")
-    grades = relationship("Grade", back_populates="homework", cascade="all, delete-orphan")
-    files = relationship("File", back_populates="homework", cascade="all, delete-orphan")
+    group = relationship("Group", back_populates="homework", lazy="joined")
+    subject = relationship("Subject", back_populates="homework", lazy="joined")
+    teacher = relationship("Teacher", back_populates="homework", lazy="joined")
+    grades = relationship("Grade", back_populates="homework", cascade="all, delete-orphan", lazy="select")
+    files = relationship("File", back_populates="homework", cascade="all, delete-orphan", lazy="select")
 
 
 class Exam(Base):
@@ -232,11 +229,11 @@ class Exam(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    group = relationship("Group", back_populates="exams")
-    subject = relationship("Subject", back_populates="exams")
-    teacher = relationship("Teacher", back_populates="exams")
-    grades = relationship("Grade", back_populates="exam", cascade="all, delete-orphan")
-    files = relationship("File", back_populates="exam", cascade="all, delete-orphan")
+    group = relationship("Group", back_populates="exams", lazy="joined")
+    subject = relationship("Subject", back_populates="exams", lazy="joined")
+    teacher = relationship("Teacher", back_populates="exams", lazy="joined")
+    grades = relationship("Grade", back_populates="exam", cascade="all, delete-orphan", lazy="select")
+    files = relationship("File", back_populates="exam", cascade="all, delete-orphan", lazy="select")
 
 
 class Grade(Base):
@@ -262,10 +259,10 @@ class Grade(Base):
     )
 
     # Relationships
-    student = relationship("Student", back_populates="grades")
-    homework = relationship("Homework", back_populates="grades")
-    exam = relationship("Exam", back_populates="grades")
-    graded_by_teacher = relationship("Teacher", back_populates="grades_given")
+    student = relationship("Student", back_populates="grades", lazy="joined")
+    homework = relationship("Homework", back_populates="grades", lazy="joined")
+    exam = relationship("Exam", back_populates="grades", lazy="joined")
+    graded_by_teacher = relationship("Teacher", back_populates="grades_given", lazy="joined")
 
 
 class Attendance(Base):
@@ -290,8 +287,9 @@ class Attendance(Base):
     )
 
     # Relationships
-    student = relationship("Student", back_populates="attendance_records")
-    teacher = relationship("Teacher", back_populates="attendance_recorded")
+    student = relationship("Student", back_populates="attendance_records", lazy="joined")
+    teacher = relationship("Teacher", back_populates="attendance_recorded", lazy="joined")
+    subject = relationship("Subject", lazy="joined")
 
 
 class Payment(Base):
@@ -316,7 +314,7 @@ class Payment(Base):
     )
 
     # Relationships
-    student = relationship("Student", back_populates="payments")
+    student = relationship("Student", back_populates="payments", lazy="joined")
 
 
 class MonthlyPaymentStatus(Base):
@@ -340,7 +338,7 @@ class MonthlyPaymentStatus(Base):
     )
 
     # Relationships
-    student = relationship("Student", back_populates="monthly_payment_status")
+    student = relationship("Student", back_populates="monthly_payment_status", lazy="joined")
 
 
 class News(Base):
@@ -358,7 +356,7 @@ class News(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    files = relationship("File", back_populates="news", cascade="all, delete-orphan")
+    files = relationship("File", back_populates="news", cascade="all, delete-orphan", lazy="select")
 
 
 class Notification(Base):
@@ -380,7 +378,7 @@ class Notification(Base):
     )
 
     # Relationships
-    user = relationship("User", back_populates="notifications")
+    user = relationship("User", back_populates="notifications", lazy="joined")
 
 
 class File(Base):
@@ -406,10 +404,10 @@ class File(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    uploaded_by_user = relationship("User", back_populates="files", foreign_keys=[uploaded_by])
-    homework = relationship("Homework", back_populates="files")
-    exam = relationship("Exam", back_populates="files")
-    news = relationship("News", back_populates="files")
+    uploaded_by_user = relationship("User", back_populates="files", foreign_keys=[uploaded_by], lazy="joined")
+    homework = relationship("Homework", back_populates="files", lazy="joined")
+    exam = relationship("Exam", back_populates="files", lazy="joined")
+    news = relationship("News", back_populates="files", lazy="joined")
 
 
 # Create all tables function

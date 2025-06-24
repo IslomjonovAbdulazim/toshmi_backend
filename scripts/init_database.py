@@ -11,49 +11,96 @@ from pathlib import Path
 # Add the parent directory to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.database import SessionLocal, engine, create_tables
-from app.models import User, Group, Subject
+from sqlalchemy import text
+from app.database import SessionLocal, engine
+from app.models import Base, User, Group, Subject
 from app.utils.auth import hash_password
 from app.utils.helpers import UserRole
 from datetime import datetime
 
 
-def create_admin_user(db, phone: int = 998901234567, password: str = "admin123",
+def create_tables_properly():
+    """Create all database tables with proper error handling"""
+    try:
+        print("🔨 Creating database tables...")
+
+        # Import all models to ensure they're registered
+        from app import models
+
+        # Drop all tables first (for clean setup)
+        print("🧹 Dropping existing tables...")
+        Base.metadata.drop_all(bind=engine)
+        print("✅ Existing tables dropped")
+
+        # Create all tables
+        print("🏗️ Creating new tables...")
+        Base.metadata.create_all(bind=engine)
+        print("✅ All tables created successfully")
+
+        # Verify tables exist
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                                       SELECT table_name
+                                       FROM information_schema.tables
+                                       WHERE table_schema = 'public'
+                                       ORDER BY table_name;
+                                       """))
+            tables = [row[0] for row in result]
+
+            print(f"📋 Tables created: {', '.join(tables)}")
+
+            if 'users' not in tables:
+                raise Exception("Users table was not created!")
+
+        return True
+
+    except Exception as e:
+        print(f"❌ Error creating tables: {str(e)}")
+        return False
+
+
+def create_admin_user(db, phone: int = 990330919, password: str = "sWk}X2<1#5[\\",
                       full_name: str = "System Administrator"):
     """Create initial admin user"""
 
-    # Check if admin already exists
-    existing_admin = db.query(User).filter(
-        User.role == UserRole.ADMIN,
-        User.phone == phone
-    ).first()
+    try:
+        # Check if admin already exists
+        existing_admin = db.query(User).filter(
+            User.role == UserRole.ADMIN,
+            User.phone == phone
+        ).first()
 
-    if existing_admin:
-        print(f"✅ Admin user already exists: {existing_admin.full_name} ({existing_admin.phone})")
-        return existing_admin
+        if existing_admin:
+            print(f"✅ Admin user already exists: {existing_admin.full_name} ({existing_admin.phone})")
+            return existing_admin
 
-    # Create admin user
-    admin_user = User(
-        role=UserRole.ADMIN,
-        phone=phone,
-        password_hash=hash_password(password),
-        full_name=full_name,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-        is_active=True
-    )
+        # Create admin user
+        admin_user = User(
+            role=UserRole.ADMIN,
+            phone=phone,
+            password_hash=hash_password(password),
+            full_name=full_name,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+            is_active=True
+        )
 
-    db.add(admin_user)
-    db.commit()
-    db.refresh(admin_user)
+        db.add(admin_user)
+        db.commit()
+        db.refresh(admin_user)
 
-    print(f"✅ Admin user created successfully!")
-    print(f"   Phone: {phone}")
-    print(f"   Password: {password}")
-    print(f"   Name: {full_name}")
-    print(f"   ⚠️  IMPORTANT: Change the password after first login!")
+        print(f"✅ Admin user created successfully!")
+        print(f"   Phone: {phone}")
+        print(f"   Password: {password}")
+        print(f"   Name: {full_name}")
+        print(f"   ⚠️  IMPORTANT: Change the password after first login!")
 
-    return admin_user
+        return admin_user
+
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error creating admin user: {str(e)}")
+        raise
 
 
 def create_basic_groups(db):
@@ -68,30 +115,36 @@ def create_basic_groups(db):
 
     created_groups = []
 
-    for group_data in groups:
-        # Check if group already exists
-        existing_group = db.query(Group).filter(Group.name == group_data["name"]).first()
+    try:
+        for group_data in groups:
+            # Check if group already exists
+            existing_group = db.query(Group).filter(Group.name == group_data["name"]).first()
 
-        if existing_group:
-            print(f"📚 Group already exists: {existing_group.name}")
-            created_groups.append(existing_group)
-            continue
+            if existing_group:
+                print(f"📚 Group already exists: {existing_group.name}")
+                created_groups.append(existing_group)
+                continue
 
-        # Create group
-        group = Group(
-            name=group_data["name"],
-            description=group_data["description"],
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-            is_active=True
-        )
+            # Create group
+            group = Group(
+                name=group_data["name"],
+                description=group_data["description"],
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+                is_active=True
+            )
 
-        db.add(group)
-        created_groups.append(group)
-        print(f"✅ Created group: {group_data['name']}")
+            db.add(group)
+            created_groups.append(group)
+            print(f"✅ Created group: {group_data['name']}")
 
-    db.commit()
-    return created_groups
+        db.commit()
+        return created_groups
+
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error creating groups: {str(e)}")
+        raise
 
 
 def create_basic_subjects(db):
@@ -111,30 +164,59 @@ def create_basic_subjects(db):
 
     created_subjects = []
 
-    for subject_data in subjects:
-        # Check if subject already exists
-        existing_subject = db.query(Subject).filter(Subject.name == subject_data["name"]).first()
+    try:
+        for subject_data in subjects:
+            # Check if subject already exists
+            existing_subject = db.query(Subject).filter(Subject.name == subject_data["name"]).first()
 
-        if existing_subject:
-            print(f"📖 Subject already exists: {existing_subject.name}")
-            created_subjects.append(existing_subject)
-            continue
+            if existing_subject:
+                print(f"📖 Subject already exists: {existing_subject.name}")
+                created_subjects.append(existing_subject)
+                continue
 
-        # Create subject
-        subject = Subject(
-            name=subject_data["name"],
-            description=subject_data["description"],
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-            is_active=True
-        )
+            # Create subject
+            subject = Subject(
+                name=subject_data["name"],
+                description=subject_data["description"],
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+                is_active=True
+            )
 
-        db.add(subject)
-        created_subjects.append(subject)
-        print(f"✅ Created subject: {subject_data['name']}")
+            db.add(subject)
+            created_subjects.append(subject)
+            print(f"✅ Created subject: {subject_data['name']}")
 
-    db.commit()
-    return created_subjects
+        db.commit()
+        return created_subjects
+
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error creating subjects: {str(e)}")
+        raise
+
+
+def test_database_connection():
+    """Test database connection before proceeding"""
+    try:
+        print("🔍 Testing database connection...")
+
+        # Test basic connection
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT 1 as test"))
+            test_value = result.scalar()
+
+            if test_value == 1:
+                print("✅ Database connection successful")
+                return True
+            else:
+                print("❌ Database connection test failed")
+                return False
+
+    except Exception as e:
+        print(f"❌ Database connection failed: {str(e)}")
+        print("💡 Check your DATABASE_URL in .env file")
+        return False
 
 
 def main():
@@ -143,10 +225,15 @@ def main():
     print("=" * 60)
 
     try:
-        # Create all tables
-        print("📊 Creating database tables...")
-        create_tables()
-        print("✅ Database tables created successfully")
+        # Test database connection first
+        if not test_database_connection():
+            print("❌ Cannot proceed without database connection")
+            return 1
+
+        # Create all tables with proper handling
+        if not create_tables_properly():
+            print("❌ Failed to create database tables")
+            return 1
 
         # Get database session
         db = SessionLocal()
@@ -178,13 +265,18 @@ def main():
             print("\n🌐 Start the application with: python run.py")
             print("📖 API documentation: http://localhost:8000/docs")
 
+        except Exception as e:
+            print(f"❌ Error during database initialization: {str(e)}")
+            return 1
         finally:
             db.close()
 
     except Exception as e:
         print(f"❌ Error during initialization: {str(e)}")
-        sys.exit(1)
+        return 1
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

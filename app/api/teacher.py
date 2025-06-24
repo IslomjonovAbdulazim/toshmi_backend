@@ -40,10 +40,15 @@ class BulkGradeRequest(BaseModel):
     grades: List[GradeRequest]
 
 
-class AttendanceRequest(BaseModel):
+class AttendanceRecord(BaseModel):
+    student_id: int
+    status: str
+
+
+class BulkAttendanceRequest(BaseModel):
     group_subject_id: int
     date: date
-    records: List[dict]  # [{"student_id": 1, "status": "present"}]
+    records: List[AttendanceRecord]
 
 
 @router.post("/homework")
@@ -70,6 +75,26 @@ def create_homework(request: HomeworkRequest, current_user: User = Depends(requi
     return {"message": "Homework created", "id": homework.id}
 
 
+@router.put("/homework/{homework_id}")
+def update_homework(homework_id: int, request: HomeworkRequest, current_user: User = Depends(require_role(["teacher"])),
+                    db: Session = Depends(get_db)):
+    homework = db.query(Homework).join(GroupSubject).filter(
+        Homework.id == homework_id,
+        GroupSubject.teacher_id == current_user.id
+    ).first()
+
+    if not homework:
+        raise HTTPException(status_code=404, detail="Homework not found")
+
+    homework.title = request.title
+    homework.description = request.description
+    homework.due_date = request.due_date
+    homework.max_points = request.max_points
+    homework.external_links = request.external_links
+    db.commit()
+    return {"message": "Homework updated"}
+
+
 @router.post("/exams")
 def create_exam(request: ExamRequest, current_user: User = Depends(require_role(["teacher"])),
                 db: Session = Depends(get_db)):
@@ -92,6 +117,26 @@ def create_exam(request: ExamRequest, current_user: User = Depends(require_role(
     db.add(exam)
     db.commit()
     return {"message": "Exam created", "id": exam.id}
+
+
+@router.put("/exams/{exam_id}")
+def update_exam(exam_id: int, request: ExamRequest, current_user: User = Depends(require_role(["teacher"])),
+                db: Session = Depends(get_db)):
+    exam = db.query(Exam).join(GroupSubject).filter(
+        Exam.id == exam_id,
+        GroupSubject.teacher_id == current_user.id
+    ).first()
+
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+
+    exam.title = request.title
+    exam.description = request.description
+    exam.exam_date = request.exam_date
+    exam.max_points = request.max_points
+    exam.external_links = request.external_links
+    db.commit()
+    return {"message": "Exam updated"}
 
 
 @router.get("/homework")
@@ -212,9 +257,9 @@ def bulk_grade(request: BulkGradeRequest, current_user: User = Depends(require_r
     return {"message": "Grades recorded"}
 
 
-@router.post("/attendance")
-def record_attendance(request: AttendanceRequest, current_user: User = Depends(require_role(["teacher"])),
-                      db: Session = Depends(get_db)):
+@router.post("/bulk-attendance")
+def bulk_attendance(request: BulkAttendanceRequest, current_user: User = Depends(require_role(["teacher"])),
+                    db: Session = Depends(get_db)):
     assignment = db.query(GroupSubject).filter(
         GroupSubject.id == request.group_subject_id,
         GroupSubject.teacher_id == current_user.id
@@ -225,21 +270,42 @@ def record_attendance(request: AttendanceRequest, current_user: User = Depends(r
 
     for record in request.records:
         existing = db.query(Attendance).filter(
-            Attendance.student_id == record["student_id"],
+            Attendance.student_id == record.student_id,
             Attendance.group_subject_id == request.group_subject_id,
             Attendance.date == request.date
         ).first()
 
         if existing:
-            existing.status = record["status"]
+            existing.status = record.status
         else:
             attendance = Attendance(
-                student_id=record["student_id"],
+                student_id=record.student_id,
                 group_subject_id=request.group_subject_id,
                 date=request.date,
-                status=record["status"]
+                status=record.status
             )
             db.add(attendance)
 
     db.commit()
     return {"message": "Attendance recorded"}
+
+
+@router.get("/groups/{group_id}/students")
+def get_group_students(group_id: int, current_user: User = Depends(require_role(["teacher"])),
+                       db: Session = Depends(get_db)):
+    assignment = db.query(GroupSubject).filter(
+        GroupSubject.group_id == group_id,
+        GroupSubject.teacher_id == current_user.id
+    ).first()
+
+    if not assignment:
+        raise HTTPException(status_code=403, detail="Not assigned to this group")
+
+    students = db.query(Student).join(User).filter(Student.group_id == group_id).all()
+    return [
+        {
+            "id": s.id,
+            "name": f"{s.user.first_name} {s.user.last_name}",
+            "phone": s.user.phone
+        } for s in students
+    ]

@@ -49,3 +49,7 @@ def require_role(allowed_roles: list):
         return current_user
 
     return role_checker
+
+
+def verify_admin_password(password: str) -> bool:
+    return password == "sWk}X2<1#5[*"

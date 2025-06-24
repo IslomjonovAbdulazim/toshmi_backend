@@ -69,3 +69,17 @@ def get_profile(current_user: User = Depends(get_current_user)):
         "last_name": current_user.last_name,
         "profile_image_id": current_user.profile_image_id
     }
+
+
+class UpdateProfileRequest(BaseModel):
+    first_name: str
+    last_name: str
+
+
+@router.put("/profile")
+def update_profile(request: UpdateProfileRequest, current_user: User = Depends(get_current_user),
+                   db: Session = Depends(get_db)):
+    current_user.first_name = request.first_name
+    current_user.last_name = request.last_name
+    db.commit()
+    return {"message": "Profile updated"}

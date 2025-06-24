@@ -4,7 +4,8 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import date
 from app.database import get_db
-from app.models.models import User, Student, Group, Subject, GroupSubject, PaymentRecord, MonthlyPayment, News, Schedule
+from app.models.models import User, Student, Group, Subject, GroupSubject, PaymentRecord, MonthlyPayment, News, \
+    Schedule, Homework, Exam
 from app.core.security import require_role, hash_password
 
 router = APIRouter()

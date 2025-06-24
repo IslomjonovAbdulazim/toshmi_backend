@@ -6,6 +6,7 @@ Crafted with passion for clean, reusable, and efficient code!
 
 import json
 import re
+import html
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Optional, Union
 from enum import Enum
@@ -87,21 +88,29 @@ def sanitize_phone_number(phone: Union[str, int]) -> int:
     return int(phone_digits)
 
 
-def clean_string(text: str) -> str:
+def clean_string(text: Optional[str]) -> str:
     """
-    Clean and normalize string
+    Clean and normalize string with HTML escaping
 
     Args:
         text: Input text
 
     Returns:
-        Cleaned text
+        Cleaned and escaped text
     """
     if not text:
         return ""
 
+    # Convert to string and strip whitespace
+    text_str = str(text).strip()
+
     # Remove extra whitespace and normalize
-    return ' '.join(text.strip().split())
+    normalized = ' '.join(text_str.split())
+
+    # Escape HTML characters for security
+    escaped = html.escape(normalized)
+
+    return escaped
 
 
 def format_phone_number(phone: int) -> str:
@@ -319,6 +328,9 @@ def validate_file_extension(filename: str, file_type: str) -> bool:
     Returns:
         True if extension is valid
     """
+    if not filename or '.' not in filename:
+        return False
+
     extension = '.' + filename.split('.')[-1].lower()
 
     if file_type == FileType.IMAGE:
@@ -339,6 +351,9 @@ def get_file_type_from_extension(filename: str) -> Optional[str]:
     Returns:
         File type or None if unknown
     """
+    if not filename or '.' not in filename:
+        return None
+
     extension = '.' + filename.split('.')[-1].lower()
 
     if extension in ALLOWED_IMAGE_EXTENSIONS:
@@ -518,6 +533,9 @@ def truncate_text(text: str, max_length: int = 100) -> str:
     Returns:
         Truncated text
     """
+    if not text:
+        return ""
+
     if len(text) <= max_length:
         return text
 

@@ -8,13 +8,11 @@ import os
 import uuid
 import shutil
 from typing import Optional, Dict, Any, BinaryIO, List
-from sqlalchemy import func  # Add this import at top
-
+from sqlalchemy import func
 from pathlib import Path
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status, UploadFile
 from datetime import datetime
-import magic
 
 from ..models import File, User, Homework, Exam, News
 from ..utils.helpers import (
@@ -63,22 +61,32 @@ class FileService:
     def _get_mime_type(self, file_path: str) -> str:
         """Get MIME type of file"""
         try:
+            import magic
             mime = magic.Magic(mime=True)
             return mime.from_file(file_path)
-        except:
-            # Fallback to basic detection
-            extension = Path(file_path).suffix.lower()
-            mime_map = {
-                '.jpg': 'image/jpeg',
-                '.jpeg': 'image/jpeg',
-                '.png': 'image/png',
-                '.gif': 'image/gif',
-                '.pdf': 'application/pdf',
-                '.doc': 'application/msword',
-                '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                '.txt': 'text/plain'
-            }
-            return mime_map.get(extension, 'application/octet-stream')
+        except ImportError:
+            # Fallback to basic detection if python-magic is not available
+            return self._get_mime_type_fallback(file_path)
+        except Exception:
+            # Fallback to basic detection if magic fails
+            return self._get_mime_type_fallback(file_path)
+
+    def _get_mime_type_fallback(self, file_path: str) -> str:
+        """Fallback MIME type detection based on file extension"""
+        extension = Path(file_path).suffix.lower()
+        mime_map = {
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.gif': 'image/gif',
+            '.webp': 'image/webp',
+            '.pdf': 'application/pdf',
+            '.doc': 'application/msword',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.txt': 'text/plain',
+            '.rtf': 'application/rtf'
+        }
+        return mime_map.get(extension, 'application/octet-stream')
 
     def upload_profile_picture(self, file: UploadFile, user_id: str) -> Dict[str, Any]:
         """

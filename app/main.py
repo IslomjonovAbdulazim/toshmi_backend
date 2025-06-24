@@ -15,7 +15,10 @@ from .database import engine, create_tables
 from .routes import auth, admin, teacher, student, parent, files
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO if not settings.debug else logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Create FastAPI application
@@ -54,12 +57,13 @@ app = FastAPI(
         "name": "MIT",
         "url": "https://opensource.org/licenses/MIT",
     },
+    debug=settings.debug
 )
 
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["*"] if settings.environment == "development" else ["https://yourdomain.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -83,11 +87,15 @@ async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """Handle general exceptions"""
-    logger.error(f"Unexpected error on {request.url}: {str(exc)}")
+    if settings.debug:
+        logger.error(f"Unexpected error on {request.url}: {str(exc)}", exc_info=True)
+    else:
+        logger.error(f"Unexpected error on {request.url}: {str(exc)}")
+
     return JSONResponse(
         status_code=500,
         content={
-            "detail": "An unexpected error occurred",
+            "detail": "An unexpected error occurred" if not settings.debug else str(exc),
             "timestamp": datetime.utcnow().isoformat()
         }
     )
@@ -99,12 +107,28 @@ async def startup_event():
     """Initialize database and perform startup tasks"""
     try:
         logger.info("🚀 Starting Education Center Management System...")
+        logger.info(f"Environment: {settings.environment}")
+        logger.info(f"Debug mode: {settings.debug}")
+        logger.info(f"Database URL: {settings.database_url[:30]}...")
 
         # Create database tables
         logger.info("📊 Creating database tables...")
         create_tables()
         logger.info("✅ Database tables created successfully")
 
+        # Create upload directories
+        import os
+        upload_dirs = [
+            settings.upload_dir,
+            os.path.join(settings.upload_dir, "profiles"),
+            os.path.join(settings.upload_dir, "documents"),
+            os.path.join(settings.upload_dir, "news")
+        ]
+
+        for upload_dir in upload_dirs:
+            os.makedirs(upload_dir, exist_ok=True)
+
+        logger.info("📁 Upload directories created successfully")
         logger.info("🎓 Education Center Management System started successfully!")
 
     except Exception as e:
@@ -194,6 +218,7 @@ def root():
         "version": "1.0.0",
         "status": "running",
         "environment": settings.environment,
+        "debug": settings.debug,
         "features": [
             "User Management (Admin, Teacher, Student, Parent)",
             "Academic Management (Homework, Exams, Grades, Attendance)",
@@ -230,7 +255,8 @@ def health_check():
         db.execute("SELECT 1")
         db.close()
         database_status = "healthy"
-    except Exception:
+    except Exception as e:
+        logger.error(f"Health check database error: {str(e)}")
         database_status = "unhealthy"
 
     return {
@@ -257,6 +283,7 @@ def api_info():
         "api_name": "Education Center Management System",
         "version": "1.0.0",
         "description": "Comprehensive educational institution management platform",
+        "environment": settings.environment,
         "endpoints": {
             "authentication": {
                 "login": "POST /auth/login",
@@ -340,11 +367,11 @@ def api_info():
         "file_support": {
             "profile_pictures": {
                 "formats": ["JPG", "PNG", "GIF", "WEBP"],
-                "max_size": "3MB"
+                "max_size": f"{settings.max_profile_image_size // (1024*1024)}MB"
             },
             "academic_files": {
                 "formats": ["PDF", "DOC", "DOCX", "TXT", "JPG", "PNG"],
-                "max_size": "10MB"
+                "max_size": f"{settings.max_file_size // (1024*1024)}MB"
             }
         },
         "generated_at": datetime.utcnow().isoformat()
@@ -384,6 +411,11 @@ def system_status():
             "statistics": stats,
             "environment": settings.environment,
             "debug_mode": settings.debug,
+            "config": {
+                "upload_dir": settings.upload_dir,
+                "max_file_size": f"{settings.max_file_size // (1024*1024)}MB",
+                "max_profile_image_size": f"{settings.max_profile_image_size // (1024*1024)}MB"
+            },
             "timestamp": datetime.utcnow().isoformat()
         }
 
@@ -396,3 +428,15 @@ def system_status():
             "error": "Database connection failed",
             "timestamp": datetime.utcnow().isoformat()
         }
+
+
+# For running with uvicorn directly
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "app.main:app",
+        host=settings.host,
+        port=settings.port,
+        reload=settings.debug,
+        log_level="debug" if settings.debug else "info"
+    )

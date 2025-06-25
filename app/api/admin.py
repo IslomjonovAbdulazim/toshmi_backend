@@ -25,6 +25,20 @@ class UpdateUserRequest(BaseModel):
     is_active: Optional[bool] = None
 
 
+class UpdatePaymentRequest(BaseModel):
+    student_id: Optional[int] = None
+    amount: Optional[int] = None
+    payment_date: Optional[date] = None
+    payment_method: Optional[str] = None
+    description: Optional[str] = None
+
+
+class UpdateMonthlyPaymentRequest(BaseModel):
+    is_completed: Optional[bool] = None
+    paid_amount: Optional[int] = None
+    due_date: Optional[date] = None
+
+
 class CreateStudentRequest(CreateUserRequest):
     group_id: int
     parent_phone: str
@@ -641,6 +655,143 @@ def delete_schedule(schedule_id: int, current_user: User = Depends(require_role(
     db.delete(schedule)
     db.commit()
     return {"message": "Schedule deleted"}
+
+
+# PAYMENT CRUD
+@router.get("/payments")
+def list_payments(skip: int = 0, limit: int = 100, current_user: User = Depends(require_role(["admin"])),
+                  db: Session = Depends(get_db)):
+    payments = db.query(PaymentRecord).offset(skip).limit(limit).all()
+    return [
+        {
+            "id": p.id,
+            "student_id": p.student_id,
+            "student_name": p.student.user.full_name,
+            "amount": p.amount,
+            "payment_date": p.payment_date,
+            "payment_method": p.payment_method,
+            "description": p.description
+        } for p in payments
+    ]
+
+
+@router.get("/payments/{payment_id}")
+def get_payment(payment_id: int, current_user: User = Depends(require_role(["admin"])),
+                db: Session = Depends(get_db)):
+    payment = db.query(PaymentRecord).filter(PaymentRecord.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    return {
+        "id": payment.id,
+        "student_id": payment.student_id,
+        "student_name": payment.student.user.full_name,
+        "amount": payment.amount,
+        "payment_date": payment.payment_date,
+        "payment_method": payment.payment_method,
+        "description": payment.description
+    }
+
+
+@router.put("/payments/{payment_id}")
+def update_payment(payment_id: int, request: UpdatePaymentRequest,
+                   current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
+    payment = db.query(PaymentRecord).filter(PaymentRecord.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    if request.student_id is not None:
+        payment.student_id = request.student_id
+    if request.amount is not None:
+        payment.amount = request.amount
+    if request.payment_date is not None:
+        payment.payment_date = request.payment_date
+    if request.payment_method is not None:
+        payment.payment_method = request.payment_method
+    if request.description is not None:
+        payment.description = request.description
+
+    db.commit()
+    return {"message": "Payment updated"}
+
+
+@router.delete("/payments/{payment_id}")
+def delete_payment(payment_id: int, current_user: User = Depends(require_role(["admin"])),
+                   db: Session = Depends(get_db)):
+    payment = db.query(PaymentRecord).filter(PaymentRecord.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    db.delete(payment)
+    db.commit()
+    return {"message": "Payment deleted"}
+
+
+# MONTHLY PAYMENT CRUD
+@router.get("/monthly-payments")
+def list_monthly_payments(current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
+    monthly_payments = db.query(MonthlyPayment).all()
+    return [
+        {
+            "id": m.id,
+            "student_id": m.student_id,
+            "student_name": m.student.user.full_name,
+            "month": m.month,
+            "year": m.year,
+            "paid_amount": m.paid_amount,
+            "is_completed": m.is_completed,
+            "due_date": m.due_date
+        } for m in monthly_payments
+    ]
+
+
+@router.get("/monthly-payments/{monthly_payment_id}")
+def get_monthly_payment(monthly_payment_id: int, current_user: User = Depends(require_role(["admin"])),
+                        db: Session = Depends(get_db)):
+    monthly = db.query(MonthlyPayment).filter(MonthlyPayment.id == monthly_payment_id).first()
+    if not monthly:
+        raise HTTPException(status_code=404, detail="Monthly payment not found")
+
+    return {
+        "id": monthly.id,
+        "student_id": monthly.student_id,
+        "student_name": monthly.student.user.full_name,
+        "month": monthly.month,
+        "year": monthly.year,
+        "paid_amount": monthly.paid_amount,
+        "is_completed": monthly.is_completed,
+        "due_date": monthly.due_date
+    }
+
+
+@router.put("/monthly-payments/{monthly_payment_id}")
+def update_monthly_payment_by_id(monthly_payment_id: int, request: UpdateMonthlyPaymentRequest,
+                                 current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
+    monthly = db.query(MonthlyPayment).filter(MonthlyPayment.id == monthly_payment_id).first()
+    if not monthly:
+        raise HTTPException(status_code=404, detail="Monthly payment not found")
+
+    if request.is_completed is not None:
+        monthly.is_completed = request.is_completed
+    if request.paid_amount is not None:
+        monthly.paid_amount = request.paid_amount
+    if request.due_date is not None:
+        monthly.due_date = request.due_date
+
+    db.commit()
+    return {"message": "Monthly payment updated"}
+
+
+@router.delete("/monthly-payments/{monthly_payment_id}")
+def delete_monthly_payment(monthly_payment_id: int, current_user: User = Depends(require_role(["admin"])),
+                           db: Session = Depends(get_db)):
+    monthly = db.query(MonthlyPayment).filter(MonthlyPayment.id == monthly_payment_id).first()
+    if not monthly:
+        raise HTTPException(status_code=404, detail="Monthly payment not found")
+
+    db.delete(monthly)
+    db.commit()
+    return {"message": "Monthly payment deleted"}
 
 
 # OTHER OPERATIONS

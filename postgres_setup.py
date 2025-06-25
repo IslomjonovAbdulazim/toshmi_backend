@@ -35,7 +35,7 @@ def test_ssl_connection():
     os.environ['PGSSLROOTCERT'] = cert_path or os.path.expanduser("~/.cloud-certs/root.crt")
 
     # Connection string with SSL
-    db_url = "postgresql://gen_user:(8Ah)S$aY)lF6t@3d7780415a2721a636acfe11.twc1.net:5432/default_db?sslmode=require&connect_timeout=30"
+    db_url = "postgresql://gen_user:(8Ah)S$aY)lF6t@islomjonovabdulazim-toshmi-backend-0914.twc1.net:5432/default_db?sslmode=require&connect_timeout=30"
 
     try:
         print("Testing SSL connection...")

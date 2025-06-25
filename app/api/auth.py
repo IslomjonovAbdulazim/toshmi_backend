@@ -5,7 +5,7 @@ from app.database import get_db
 from app.models.models import User
 from app.core.security import (
     verify_password, create_access_token, get_current_user,
-    hash_password, verify_admin_password
+    hash_password
 )
 
 router = APIRouter()
@@ -38,12 +38,8 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    password_valid = (
-        verify_admin_password(request.password) if user.role == "admin"
-        else verify_password(request.password, user.password_hash)
-    )
-
-    if not password_valid:
+    # All users (including admin) use password hash
+    if not verify_password(request.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = create_access_token({"sub": str(user.id), "role": user.role})
@@ -62,14 +58,10 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
 @router.put("/change-password")
 def change_password(request: ChangePasswordRequest, current_user: User = Depends(get_current_user),
                     db: Session = Depends(get_db)):
-    if current_user.role == "admin":
-        if not verify_admin_password(request.old_password):
-            raise HTTPException(status_code=400, detail="Invalid old password")
-    else:
-        if not verify_password(request.old_password, current_user.password_hash):
-            raise HTTPException(status_code=400, detail="Invalid old password")
-        current_user.password_hash = hash_password(request.new_password)
+    if not verify_password(request.old_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Invalid old password")
 
+    current_user.password_hash = hash_password(request.new_password)
     db.commit()
     return {"message": "Password changed"}
 

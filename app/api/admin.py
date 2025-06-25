@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import date, time
 from app.database import get_db
-from app.models.models import User, Student, Group, Subject, GroupSubject, PaymentRecord, MonthlyPayment, News, Schedule
-from app.core.security import require_role, hash_password
+from app.models.models import User, Student, Group, Subject, GroupSubject, PaymentRecord, MonthlyPayment, News, \
+    Schedule, TeacherAttendance
+from app.core.security import require_role, get_password_hash
 
 router = APIRouter()
 
@@ -23,20 +24,6 @@ class UpdateUserRequest(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     is_active: Optional[bool] = None
-
-
-class UpdatePaymentRequest(BaseModel):
-    student_id: Optional[int] = None
-    amount: Optional[int] = None
-    payment_date: Optional[date] = None
-    payment_method: Optional[str] = None
-    description: Optional[str] = None
-
-
-class UpdateMonthlyPaymentRequest(BaseModel):
-    is_completed: Optional[bool] = None
-    paid_amount: Optional[int] = None
-    due_date: Optional[date] = None
 
 
 class CreateStudentRequest(CreateUserRequest):
@@ -99,14 +86,29 @@ class ScheduleRequest(BaseModel):
     room: str
 
 
+class TeacherAttendanceRequest(BaseModel):
+    teacher_id: int
+    date: date
+    status: str  # present, absent, sick, vacation, professional_development
+    check_in_time: Optional[str] = None
+    check_out_time: Optional[str] = None
+    notes: str = ""
+
+
+class UpdateTeacherAttendanceRequest(BaseModel):
+    status: Optional[str] = None
+    check_in_time: Optional[str] = None
+    check_out_time: Optional[str] = None
+    notes: Optional[str] = None
+
+
 def create_user(data: CreateUserRequest, role: str, db: Session):
-    existing = db.query(User).filter(User.phone == data.phone).first()
-    if existing:
+    if db.query(User).filter(User.phone == data.phone).first():
         raise HTTPException(status_code=400, detail="Phone number already exists")
 
     user = User(
         phone=data.phone,
-        password_hash=hash_password(data.password),
+        password_hash=get_password_hash(data.password, role),
         role=role,
         first_name=data.first_name,
         last_name=data.last_name
@@ -118,13 +120,12 @@ def create_user(data: CreateUserRequest, role: str, db: Session):
 
 def update_user(user: User, data: UpdateUserRequest, db: Session):
     if data.phone and data.phone != user.phone:
-        existing = db.query(User).filter(User.phone == data.phone, User.id != user.id).first()
-        if existing:
+        if db.query(User).filter(User.phone == data.phone, User.id != user.id).first():
             raise HTTPException(status_code=400, detail="Phone number already exists")
         user.phone = data.phone
 
     if data.password:
-        user.password_hash = hash_password(data.password)
+        user.password_hash = get_password_hash(data.password, user.role)
     if data.first_name:
         user.first_name = data.first_name
     if data.last_name:
@@ -133,12 +134,128 @@ def update_user(user: User, data: UpdateUserRequest, db: Session):
         user.is_active = data.is_active
 
 
-# STUDENT CRUD
+# TEACHER ATTENDANCE CRUD
+@router.post("/teacher-attendance")
+def create_teacher_attendance(request: TeacherAttendanceRequest, current_user: User = Depends(require_role(["admin"])),
+                              db: Session = Depends(get_db)):
+    teacher = db.query(User).filter(User.id == request.teacher_id, User.role == "teacher").first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
+    existing = db.query(TeacherAttendance).filter(
+        TeacherAttendance.teacher_id == request.teacher_id,
+        TeacherAttendance.date == request.date
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Attendance already recorded for this date")
+
+    attendance = TeacherAttendance(
+        teacher_id=request.teacher_id,
+        date=request.date,
+        status=request.status,
+        check_in_time=time.fromisoformat(request.check_in_time) if request.check_in_time else None,
+        check_out_time=time.fromisoformat(request.check_out_time) if request.check_out_time else None,
+        notes=request.notes,
+        recorded_by=current_user.id
+    )
+    db.add(attendance)
+    db.commit()
+    return {"message": "Teacher attendance recorded", "id": attendance.id}
+
+
+@router.get("/teacher-attendance")
+def list_teacher_attendance(teacher_id: Optional[int] = None, start_date: Optional[date] = None,
+                            end_date: Optional[date] = None, current_user: User = Depends(require_role(["admin"])),
+                            db: Session = Depends(get_db)):
+    query = db.query(TeacherAttendance).options(
+        joinedload(TeacherAttendance.teacher),
+        joinedload(TeacherAttendance.recorder)
+    )
+
+    if teacher_id:
+        query = query.filter(TeacherAttendance.teacher_id == teacher_id)
+    if start_date:
+        query = query.filter(TeacherAttendance.date >= start_date)
+    if end_date:
+        query = query.filter(TeacherAttendance.date <= end_date)
+
+    attendance_records = query.order_by(TeacherAttendance.date.desc()).all()
+
+    return [{
+        "id": a.id,
+        "teacher_id": a.teacher_id,
+        "teacher_name": a.teacher.full_name,
+        "date": a.date,
+        "status": a.status,
+        "check_in_time": a.check_in_time,
+        "check_out_time": a.check_out_time,
+        "notes": a.notes,
+        "recorded_by": a.recorder.full_name
+    } for a in attendance_records]
+
+
+@router.get("/teacher-attendance/{attendance_id}")
+def get_teacher_attendance(attendance_id: int, current_user: User = Depends(require_role(["admin"])),
+                           db: Session = Depends(get_db)):
+    attendance = db.query(TeacherAttendance).options(
+        joinedload(TeacherAttendance.teacher),
+        joinedload(TeacherAttendance.recorder)
+    ).filter(TeacherAttendance.id == attendance_id).first()
+
+    if not attendance:
+        raise HTTPException(status_code=404, detail="Teacher attendance record not found")
+
+    return {
+        "id": attendance.id,
+        "teacher_id": attendance.teacher_id,
+        "teacher_name": attendance.teacher.full_name,
+        "date": attendance.date,
+        "status": attendance.status,
+        "check_in_time": attendance.check_in_time,
+        "check_out_time": attendance.check_out_time,
+        "notes": attendance.notes,
+        "recorded_by": attendance.recorder.full_name,
+        "created_at": attendance.created_at
+    }
+
+
+@router.put("/teacher-attendance/{attendance_id}")
+def update_teacher_attendance(attendance_id: int, request: UpdateTeacherAttendanceRequest,
+                              current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
+    attendance = db.query(TeacherAttendance).filter(TeacherAttendance.id == attendance_id).first()
+    if not attendance:
+        raise HTTPException(status_code=404, detail="Teacher attendance record not found")
+
+    if request.status:
+        attendance.status = request.status
+    if request.check_in_time:
+        attendance.check_in_time = time.fromisoformat(request.check_in_time)
+    if request.check_out_time:
+        attendance.check_out_time = time.fromisoformat(request.check_out_time)
+    if request.notes is not None:
+        attendance.notes = request.notes
+
+    db.commit()
+    return {"message": "Teacher attendance updated"}
+
+
+@router.delete("/teacher-attendance/{attendance_id}")
+def delete_teacher_attendance(attendance_id: int, current_user: User = Depends(require_role(["admin"])),
+                              db: Session = Depends(get_db)):
+    attendance = db.query(TeacherAttendance).filter(TeacherAttendance.id == attendance_id).first()
+    if not attendance:
+        raise HTTPException(status_code=404, detail="Teacher attendance record not found")
+
+    db.delete(attendance)
+    db.commit()
+    return {"message": "Teacher attendance record deleted"}
+
+
+# EXISTING STUDENT CRUD
 @router.post("/students")
 def create_student(request: CreateStudentRequest, current_user: User = Depends(require_role(["admin"])),
                    db: Session = Depends(get_db)):
     user = create_user(request, "student", db)
-
     student = Student(
         user_id=user.id,
         group_id=request.group_id,
@@ -153,25 +270,31 @@ def create_student(request: CreateStudentRequest, current_user: User = Depends(r
 @router.get("/students")
 def list_students(skip: int = 0, limit: int = 100, current_user: User = Depends(require_role(["admin"])),
                   db: Session = Depends(get_db)):
-    students = db.query(Student).offset(skip).limit(limit).all()
-    return [
-        {
-            "id": s.id,
-            "user_id": s.user_id,
-            "name": s.user.full_name,
-            "phone": s.user.phone,
-            "group_name": s.group.name,
-            "parent_phone": s.parent_phone,
-            "graduation_year": s.graduation_year,
-            "is_active": s.user.is_active
-        } for s in students
-    ]
+    students = db.query(Student).options(
+        joinedload(Student.user),
+        joinedload(Student.group)
+    ).offset(skip).limit(limit).all()
+
+    return [{
+        "id": s.id,
+        "user_id": s.user_id,
+        "name": s.user.full_name,
+        "phone": s.user.phone,
+        "group_name": s.group.name,
+        "parent_phone": s.parent_phone,
+        "graduation_year": s.graduation_year,
+        "is_active": s.user.is_active
+    } for s in students]
 
 
 @router.get("/students/{student_id}")
 def get_student(student_id: int, current_user: User = Depends(require_role(["admin"])),
                 db: Session = Depends(get_db)):
-    student = db.query(Student).filter(Student.id == student_id).first()
+    student = db.query(Student).options(
+        joinedload(Student.user),
+        joinedload(Student.group)
+    ).filter(Student.id == student_id).first()
+
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
@@ -191,13 +314,12 @@ def get_student(student_id: int, current_user: User = Depends(require_role(["adm
 @router.put("/students/{student_id}")
 def update_student(student_id: int, request: UpdateStudentRequest,
                    current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
-    student = db.query(Student).filter(Student.id == student_id).first()
+    student = db.query(Student).options(joinedload(Student.user)).filter(Student.id == student_id).first()
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
     if request.user_data:
         update_user(student.user, request.user_data, db)
-
     if request.group_id:
         student.group_id = request.group_id
     if request.parent_phone:
@@ -212,7 +334,7 @@ def update_student(student_id: int, request: UpdateStudentRequest,
 @router.delete("/students/{student_id}")
 def delete_student(student_id: int, current_user: User = Depends(require_role(["admin"])),
                    db: Session = Depends(get_db)):
-    student = db.query(Student).filter(Student.id == student_id).first()
+    student = db.query(Student).options(joinedload(Student.user)).filter(Student.id == student_id).first()
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
@@ -221,7 +343,6 @@ def delete_student(student_id: int, current_user: User = Depends(require_role(["
     return {"message": "Student deactivated"}
 
 
-# TEACHER CRUD
 @router.post("/teachers")
 def create_teacher(request: CreateUserRequest, current_user: User = Depends(require_role(["admin"])),
                    db: Session = Depends(get_db)):
@@ -233,20 +354,17 @@ def create_teacher(request: CreateUserRequest, current_user: User = Depends(requ
 @router.get("/teachers")
 def list_teachers(current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
     teachers = db.query(User).filter(User.role == "teacher").all()
-    return [
-        {
-            "id": t.id,
-            "name": t.full_name,
-            "phone": t.phone,
-            "is_active": t.is_active
-        } for t in teachers
-    ]
+    return [{"id": t.id, "name": t.full_name, "phone": t.phone, "is_active": t.is_active} for t in teachers]
 
 
 @router.get("/teachers/{teacher_id}")
 def get_teacher(teacher_id: int, current_user: User = Depends(require_role(["admin"])),
                 db: Session = Depends(get_db)):
-    teacher = db.query(User).filter(User.id == teacher_id, User.role == "teacher").first()
+    teacher = db.query(User).options(
+        selectinload(User.group_subjects).joinedload(GroupSubject.group),
+        selectinload(User.group_subjects).joinedload(GroupSubject.subject)
+    ).filter(User.id == teacher_id, User.role == "teacher").first()
+
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
 
@@ -257,13 +375,11 @@ def get_teacher(teacher_id: int, current_user: User = Depends(require_role(["adm
         "first_name": teacher.first_name,
         "last_name": teacher.last_name,
         "is_active": teacher.is_active,
-        "assigned_subjects": [
-            {
-                "group_subject_id": gs.id,
-                "group_name": gs.group.name,
-                "subject_name": gs.subject.name
-            } for gs in teacher.group_subjects
-        ]
+        "assigned_subjects": [{
+            "group_subject_id": gs.id,
+            "group_name": gs.group.name,
+            "subject_name": gs.subject.name
+        } for gs in teacher.group_subjects]
     }
 
 
@@ -273,7 +389,6 @@ def update_teacher(teacher_id: int, request: UpdateUserRequest,
     teacher = db.query(User).filter(User.id == teacher_id, User.role == "teacher").first()
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
-
     update_user(teacher, request, db)
     db.commit()
     return {"message": "Teacher updated"}
@@ -285,13 +400,11 @@ def delete_teacher(teacher_id: int, current_user: User = Depends(require_role(["
     teacher = db.query(User).filter(User.id == teacher_id, User.role == "teacher").first()
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
-
     teacher.is_active = False
     db.commit()
     return {"message": "Teacher deactivated"}
 
 
-# PARENT CRUD
 @router.post("/parents")
 def create_parent(request: CreateUserRequest, current_user: User = Depends(require_role(["admin"])),
                   db: Session = Depends(get_db)):
@@ -303,14 +416,7 @@ def create_parent(request: CreateUserRequest, current_user: User = Depends(requi
 @router.get("/parents")
 def list_parents(current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
     parents = db.query(User).filter(User.role == "parent").all()
-    return [
-        {
-            "id": p.id,
-            "name": p.full_name,
-            "phone": p.phone,
-            "is_active": p.is_active
-        } for p in parents
-    ]
+    return [{"id": p.id, "name": p.full_name, "phone": p.phone, "is_active": p.is_active} for p in parents]
 
 
 @router.put("/parents/{parent_id}")
@@ -319,7 +425,6 @@ def update_parent(parent_id: int, request: UpdateUserRequest,
     parent = db.query(User).filter(User.id == parent_id, User.role == "parent").first()
     if not parent:
         raise HTTPException(status_code=404, detail="Parent not found")
-
     update_user(parent, request, db)
     db.commit()
     return {"message": "Parent updated"}
@@ -331,20 +436,16 @@ def delete_parent(parent_id: int, current_user: User = Depends(require_role(["ad
     parent = db.query(User).filter(User.id == parent_id, User.role == "parent").first()
     if not parent:
         raise HTTPException(status_code=404, detail="Parent not found")
-
     parent.is_active = False
     db.commit()
     return {"message": "Parent deactivated"}
 
 
-# GROUP CRUD
 @router.post("/groups")
 def create_group(request: CreateGroupRequest, current_user: User = Depends(require_role(["admin"])),
                  db: Session = Depends(get_db)):
-    existing = db.query(Group).filter(Group.name == request.name).first()
-    if existing:
+    if db.query(Group).filter(Group.name == request.name).first():
         raise HTTPException(status_code=400, detail="Group name already exists")
-
     group = Group(name=request.name, academic_year=request.academic_year)
     db.add(group)
     db.commit()
@@ -353,21 +454,18 @@ def create_group(request: CreateGroupRequest, current_user: User = Depends(requi
 
 @router.get("/groups")
 def list_groups(current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
-    groups = db.query(Group).all()
-    return [
-        {
-            "id": g.id,
-            "name": g.name,
-            "academic_year": g.academic_year,
-            "student_count": len(g.students)
-        } for g in groups
-    ]
+    groups = db.query(Group).options(selectinload(Group.students)).all()
+    return [{"id": g.id, "name": g.name, "academic_year": g.academic_year, "student_count": len(g.students)} for g in
+            groups]
 
 
 @router.get("/groups/{group_id}")
 def get_group(group_id: int, current_user: User = Depends(require_role(["admin"])),
               db: Session = Depends(get_db)):
-    group = db.query(Group).filter(Group.id == group_id).first()
+    group = db.query(Group).options(
+        selectinload(Group.students).joinedload(Student.user)
+    ).filter(Group.id == group_id).first()
+
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
@@ -376,13 +474,7 @@ def get_group(group_id: int, current_user: User = Depends(require_role(["admin"]
         "name": group.name,
         "academic_year": group.academic_year,
         "student_count": len(group.students),
-        "students": [
-            {
-                "id": s.id,
-                "name": s.user.full_name,
-                "phone": s.user.phone
-            } for s in group.students
-        ]
+        "students": [{"id": s.id, "name": s.user.full_name, "phone": s.user.phone} for s in group.students]
     }
 
 
@@ -393,10 +485,8 @@ def update_group(group_id: int, request: CreateGroupRequest,
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    if request.name != group.name:
-        existing = db.query(Group).filter(Group.name == request.name, Group.id != group_id).first()
-        if existing:
-            raise HTTPException(status_code=400, detail="Group name already exists")
+    if request.name != group.name and db.query(Group).filter(Group.name == request.name, Group.id != group_id).first():
+        raise HTTPException(status_code=400, detail="Group name already exists")
 
     group.name = request.name
     group.academic_year = request.academic_year
@@ -407,26 +497,21 @@ def update_group(group_id: int, request: CreateGroupRequest,
 @router.delete("/groups/{group_id}")
 def delete_group(group_id: int, current_user: User = Depends(require_role(["admin"])),
                  db: Session = Depends(get_db)):
-    group = db.query(Group).filter(Group.id == group_id).first()
+    group = db.query(Group).options(selectinload(Group.students)).filter(Group.id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
-
     if group.students:
         raise HTTPException(status_code=400, detail="Cannot delete group with students")
-
     db.delete(group)
     db.commit()
     return {"message": "Group deleted"}
 
 
-# SUBJECT CRUD
 @router.post("/subjects")
 def create_subject(request: CreateSubjectRequest, current_user: User = Depends(require_role(["admin"])),
                    db: Session = Depends(get_db)):
-    existing = db.query(Subject).filter(Subject.code == request.code).first()
-    if existing:
+    if db.query(Subject).filter(Subject.code == request.code).first():
         raise HTTPException(status_code=400, detail="Subject code already exists")
-
     subject = Subject(name=request.name, code=request.code)
     db.add(subject)
     db.commit()
@@ -436,19 +521,17 @@ def create_subject(request: CreateSubjectRequest, current_user: User = Depends(r
 @router.get("/subjects")
 def list_subjects(current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
     subjects = db.query(Subject).all()
-    return [
-        {
-            "id": s.id,
-            "name": s.name,
-            "code": s.code
-        } for s in subjects
-    ]
+    return [{"id": s.id, "name": s.name, "code": s.code} for s in subjects]
 
 
 @router.get("/subjects/{subject_id}")
 def get_subject(subject_id: int, current_user: User = Depends(require_role(["admin"])),
                 db: Session = Depends(get_db)):
-    subject = db.query(Subject).filter(Subject.id == subject_id).first()
+    subject = db.query(Subject).options(
+        selectinload(Subject.group_subjects).joinedload(GroupSubject.group),
+        selectinload(Subject.group_subjects).joinedload(GroupSubject.teacher)
+    ).filter(Subject.id == subject_id).first()
+
     if not subject:
         raise HTTPException(status_code=404, detail="Subject not found")
 
@@ -456,13 +539,11 @@ def get_subject(subject_id: int, current_user: User = Depends(require_role(["adm
         "id": subject.id,
         "name": subject.name,
         "code": subject.code,
-        "assignments": [
-            {
-                "group_subject_id": gs.id,
-                "group_name": gs.group.name,
-                "teacher_name": gs.teacher.full_name
-            } for gs in subject.group_subjects
-        ]
+        "assignments": [{
+            "group_subject_id": gs.id,
+            "group_name": gs.group.name,
+            "teacher_name": gs.teacher.full_name
+        } for gs in subject.group_subjects]
     }
 
 
@@ -473,10 +554,9 @@ def update_subject(subject_id: int, request: CreateSubjectRequest,
     if not subject:
         raise HTTPException(status_code=404, detail="Subject not found")
 
-    if request.code != subject.code:
-        existing = db.query(Subject).filter(Subject.code == request.code, Subject.id != subject_id).first()
-        if existing:
-            raise HTTPException(status_code=400, detail="Subject code already exists")
+    if request.code != subject.code and db.query(Subject).filter(Subject.code == request.code,
+                                                                 Subject.id != subject_id).first():
+        raise HTTPException(status_code=400, detail="Subject code already exists")
 
     subject.name = request.name
     subject.code = request.code
@@ -487,19 +567,16 @@ def update_subject(subject_id: int, request: CreateSubjectRequest,
 @router.delete("/subjects/{subject_id}")
 def delete_subject(subject_id: int, current_user: User = Depends(require_role(["admin"])),
                    db: Session = Depends(get_db)):
-    subject = db.query(Subject).filter(Subject.id == subject_id).first()
+    subject = db.query(Subject).options(selectinload(Subject.group_subjects)).filter(Subject.id == subject_id).first()
     if not subject:
         raise HTTPException(status_code=404, detail="Subject not found")
-
     if subject.group_subjects:
         raise HTTPException(status_code=400, detail="Cannot delete subject with active assignments")
-
     db.delete(subject)
     db.commit()
     return {"message": "Subject deleted"}
 
 
-# NEWS CRUD
 @router.post("/news")
 def create_news(request: NewsRequest, current_user: User = Depends(require_role(["admin"])),
                 db: Session = Depends(get_db)):
@@ -517,23 +594,21 @@ def create_news(request: NewsRequest, current_user: User = Depends(require_role(
 
 @router.get("/news")
 def list_news(current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
-    news_list = db.query(News).all()
-    return [
-        {
-            "id": n.id,
-            "title": n.title,
-            "content": n.content[:200] + "..." if len(n.content) > 200 else n.content,
-            "author_name": n.author.full_name,
-            "created_at": n.created_at,
-            "is_published": n.is_published
-        } for n in news_list
-    ]
+    news_list = db.query(News).options(joinedload(News.author)).all()
+    return [{
+        "id": n.id,
+        "title": n.title,
+        "content": n.content[:200] + "..." if len(n.content) > 200 else n.content,
+        "author_name": n.author.full_name,
+        "created_at": n.created_at,
+        "is_published": n.is_published
+    } for n in news_list]
 
 
 @router.get("/news/{news_id}")
 def get_news(news_id: int, current_user: User = Depends(require_role(["admin"])),
              db: Session = Depends(get_db)):
-    news = db.query(News).filter(News.id == news_id).first()
+    news = db.query(News).options(joinedload(News.author)).filter(News.id == news_id).first()
     if not news:
         raise HTTPException(status_code=404, detail="News not found")
 
@@ -570,13 +645,11 @@ def delete_news(news_id: int, current_user: User = Depends(require_role(["admin"
     news = db.query(News).filter(News.id == news_id).first()
     if not news:
         raise HTTPException(status_code=404, detail="News not found")
-
     db.delete(news)
     db.commit()
     return {"message": "News deleted"}
 
 
-# SCHEDULE CRUD
 @router.post("/schedule")
 def create_schedule(request: ScheduleRequest, current_user: User = Depends(require_role(["admin"])),
                     db: Session = Depends(get_db)):
@@ -594,25 +667,33 @@ def create_schedule(request: ScheduleRequest, current_user: User = Depends(requi
 
 @router.get("/schedule")
 def list_schedules(current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
-    schedules = db.query(Schedule).all()
-    return [
-        {
-            "id": s.id,
-            "group_name": s.group_subject.group.name,
-            "subject_name": s.group_subject.subject.name,
-            "teacher_name": s.group_subject.teacher.full_name,
-            "day": s.day,
-            "start_time": s.start_time,
-            "end_time": s.end_time,
-            "room": s.room
-        } for s in schedules
-    ]
+    schedules = db.query(Schedule).options(
+        joinedload(Schedule.group_subject).joinedload(GroupSubject.group),
+        joinedload(Schedule.group_subject).joinedload(GroupSubject.subject),
+        joinedload(Schedule.group_subject).joinedload(GroupSubject.teacher)
+    ).all()
+
+    return [{
+        "id": s.id,
+        "group_name": s.group_subject.group.name,
+        "subject_name": s.group_subject.subject.name,
+        "teacher_name": s.group_subject.teacher.full_name,
+        "day": s.day,
+        "start_time": s.start_time,
+        "end_time": s.end_time,
+        "room": s.room
+    } for s in schedules]
 
 
 @router.get("/schedule/{schedule_id}")
 def get_schedule(schedule_id: int, current_user: User = Depends(require_role(["admin"])),
                  db: Session = Depends(get_db)):
-    schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
+    schedule = db.query(Schedule).options(
+        joinedload(Schedule.group_subject).joinedload(GroupSubject.group),
+        joinedload(Schedule.group_subject).joinedload(GroupSubject.subject),
+        joinedload(Schedule.group_subject).joinedload(GroupSubject.teacher)
+    ).filter(Schedule.id == schedule_id).first()
+
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
@@ -651,150 +732,11 @@ def delete_schedule(schedule_id: int, current_user: User = Depends(require_role(
     schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
-
     db.delete(schedule)
     db.commit()
     return {"message": "Schedule deleted"}
 
 
-# PAYMENT CRUD
-@router.get("/payments")
-def list_payments(skip: int = 0, limit: int = 100, current_user: User = Depends(require_role(["admin"])),
-                  db: Session = Depends(get_db)):
-    payments = db.query(PaymentRecord).offset(skip).limit(limit).all()
-    return [
-        {
-            "id": p.id,
-            "student_id": p.student_id,
-            "student_name": p.student.user.full_name,
-            "amount": p.amount,
-            "payment_date": p.payment_date,
-            "payment_method": p.payment_method,
-            "description": p.description
-        } for p in payments
-    ]
-
-
-@router.get("/payments/{payment_id}")
-def get_payment(payment_id: int, current_user: User = Depends(require_role(["admin"])),
-                db: Session = Depends(get_db)):
-    payment = db.query(PaymentRecord).filter(PaymentRecord.id == payment_id).first()
-    if not payment:
-        raise HTTPException(status_code=404, detail="Payment not found")
-
-    return {
-        "id": payment.id,
-        "student_id": payment.student_id,
-        "student_name": payment.student.user.full_name,
-        "amount": payment.amount,
-        "payment_date": payment.payment_date,
-        "payment_method": payment.payment_method,
-        "description": payment.description
-    }
-
-
-@router.put("/payments/{payment_id}")
-def update_payment(payment_id: int, request: UpdatePaymentRequest,
-                   current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
-    payment = db.query(PaymentRecord).filter(PaymentRecord.id == payment_id).first()
-    if not payment:
-        raise HTTPException(status_code=404, detail="Payment not found")
-
-    if request.student_id is not None:
-        payment.student_id = request.student_id
-    if request.amount is not None:
-        payment.amount = request.amount
-    if request.payment_date is not None:
-        payment.payment_date = request.payment_date
-    if request.payment_method is not None:
-        payment.payment_method = request.payment_method
-    if request.description is not None:
-        payment.description = request.description
-
-    db.commit()
-    return {"message": "Payment updated"}
-
-
-@router.delete("/payments/{payment_id}")
-def delete_payment(payment_id: int, current_user: User = Depends(require_role(["admin"])),
-                   db: Session = Depends(get_db)):
-    payment = db.query(PaymentRecord).filter(PaymentRecord.id == payment_id).first()
-    if not payment:
-        raise HTTPException(status_code=404, detail="Payment not found")
-
-    db.delete(payment)
-    db.commit()
-    return {"message": "Payment deleted"}
-
-
-# MONTHLY PAYMENT CRUD
-@router.get("/monthly-payments")
-def list_monthly_payments(current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
-    monthly_payments = db.query(MonthlyPayment).all()
-    return [
-        {
-            "id": m.id,
-            "student_id": m.student_id,
-            "student_name": m.student.user.full_name,
-            "month": m.month,
-            "year": m.year,
-            "paid_amount": m.paid_amount,
-            "is_completed": m.is_completed,
-            "due_date": m.due_date
-        } for m in monthly_payments
-    ]
-
-
-@router.get("/monthly-payments/{monthly_payment_id}")
-def get_monthly_payment(monthly_payment_id: int, current_user: User = Depends(require_role(["admin"])),
-                        db: Session = Depends(get_db)):
-    monthly = db.query(MonthlyPayment).filter(MonthlyPayment.id == monthly_payment_id).first()
-    if not monthly:
-        raise HTTPException(status_code=404, detail="Monthly payment not found")
-
-    return {
-        "id": monthly.id,
-        "student_id": monthly.student_id,
-        "student_name": monthly.student.user.full_name,
-        "month": monthly.month,
-        "year": monthly.year,
-        "paid_amount": monthly.paid_amount,
-        "is_completed": monthly.is_completed,
-        "due_date": monthly.due_date
-    }
-
-
-@router.put("/monthly-payments/{monthly_payment_id}")
-def update_monthly_payment_by_id(monthly_payment_id: int, request: UpdateMonthlyPaymentRequest,
-                                 current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
-    monthly = db.query(MonthlyPayment).filter(MonthlyPayment.id == monthly_payment_id).first()
-    if not monthly:
-        raise HTTPException(status_code=404, detail="Monthly payment not found")
-
-    if request.is_completed is not None:
-        monthly.is_completed = request.is_completed
-    if request.paid_amount is not None:
-        monthly.paid_amount = request.paid_amount
-    if request.due_date is not None:
-        monthly.due_date = request.due_date
-
-    db.commit()
-    return {"message": "Monthly payment updated"}
-
-
-@router.delete("/monthly-payments/{monthly_payment_id}")
-def delete_monthly_payment(monthly_payment_id: int, current_user: User = Depends(require_role(["admin"])),
-                           db: Session = Depends(get_db)):
-    monthly = db.query(MonthlyPayment).filter(MonthlyPayment.id == monthly_payment_id).first()
-    if not monthly:
-        raise HTTPException(status_code=404, detail="Monthly payment not found")
-
-    db.delete(monthly)
-    db.commit()
-    return {"message": "Monthly payment deleted"}
-
-
-# OTHER OPERATIONS
 @router.post("/assign-teacher")
 def assign_teacher(request: AssignTeacherRequest, current_user: User = Depends(require_role(["admin"])),
                    db: Session = Depends(get_db)):

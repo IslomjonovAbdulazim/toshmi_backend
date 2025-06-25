@@ -17,7 +17,7 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     profile_image_id = Column(Integer, ForeignKey("files.id"), nullable=True)
 
-    profile_image = relationship("File", foreign_keys=[profile_image_id])
+    # Clean relationships without conflicts
     student_profile = relationship("Student", back_populates="user", uselist=False)
     group_subjects = relationship("GroupSubject", back_populates="teacher")
     news_authored = relationship("News", back_populates="author")
@@ -212,6 +212,7 @@ class File(Base):
     related_id = Column(Integer)
     file_type = Column(String)
 
+    # Simple relationship without conflicts
     uploader = relationship("User", foreign_keys=[uploaded_by])
 
 

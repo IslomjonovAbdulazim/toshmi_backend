@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from datetime import datetime, date
 from app.database import get_db
-from app.models.models import User, Student, Homework, Exam, HomeworkGrade, ExamGrade, Attendance, GroupSubject
+from app.models.models import User, Student, Group, Homework, Exam, HomeworkGrade, ExamGrade, Attendance, GroupSubject
 from app.core.security import require_role
 
 router = APIRouter()
@@ -34,9 +34,13 @@ class GradeRequest(BaseModel):
     comment: str = ""
 
 
-class BulkGradeRequest(BaseModel):
-    homework_id: int = None
-    exam_id: int = None
+class BulkHomeworkGradeRequest(BaseModel):
+    homework_id: int
+    grades: List[GradeRequest]
+
+
+class BulkExamGradeRequest(BaseModel):
+    exam_id: int
     grades: List[GradeRequest]
 
 
@@ -51,8 +55,17 @@ class BulkAttendanceRequest(BaseModel):
     records: List[AttendanceRecord]
 
 
+class AttendanceTableRequest(BaseModel):
+    group_subject_id: int
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+
+
 def verify_teacher_assignment(group_subject_id: int, teacher_id: int, db: Session):
-    assignment = db.query(GroupSubject).filter(
+    assignment = db.query(GroupSubject).options(
+        joinedload(GroupSubject.group),
+        joinedload(GroupSubject.subject)
+    ).filter(
         GroupSubject.id == group_subject_id,
         GroupSubject.teacher_id == teacher_id
     ).first()
@@ -62,7 +75,11 @@ def verify_teacher_assignment(group_subject_id: int, teacher_id: int, db: Sessio
 
 
 def verify_teacher_homework(homework_id: int, teacher_id: int, db: Session):
-    homework = db.query(Homework).join(Homework.group_subject).filter(
+    homework = db.query(Homework).options(
+        joinedload(Homework.group_subject).joinedload(GroupSubject.group),
+        joinedload(Homework.group_subject).joinedload(GroupSubject.subject),
+        selectinload(Homework.grades)
+    ).filter(
         Homework.id == homework_id,
         Homework.group_subject.has(teacher_id=teacher_id)
     ).first()
@@ -72,7 +89,11 @@ def verify_teacher_homework(homework_id: int, teacher_id: int, db: Session):
 
 
 def verify_teacher_exam(exam_id: int, teacher_id: int, db: Session):
-    exam = db.query(Exam).join(Exam.group_subject).filter(
+    exam = db.query(Exam).options(
+        joinedload(Exam.group_subject).joinedload(GroupSubject.group),
+        joinedload(Exam.group_subject).joinedload(GroupSubject.subject),
+        selectinload(Exam.grades)
+    ).filter(
         Exam.id == exam_id,
         Exam.group_subject.has(teacher_id=teacher_id)
     ).first()
@@ -85,7 +106,6 @@ def verify_teacher_exam(exam_id: int, teacher_id: int, db: Session):
 def create_homework(request: HomeworkRequest, current_user: User = Depends(require_role(["teacher"])),
                     db: Session = Depends(get_db)):
     verify_teacher_assignment(request.group_subject_id, current_user.id, db)
-
     homework = Homework(
         group_subject_id=request.group_subject_id,
         title=request.title,
@@ -103,7 +123,6 @@ def create_homework(request: HomeworkRequest, current_user: User = Depends(requi
 def update_homework(homework_id: int, request: HomeworkRequest,
                     current_user: User = Depends(require_role(["teacher"])), db: Session = Depends(get_db)):
     homework = verify_teacher_homework(homework_id, current_user.id, db)
-
     homework.title = request.title
     homework.description = request.description
     homework.due_date = request.due_date
@@ -117,7 +136,6 @@ def update_homework(homework_id: int, request: HomeworkRequest,
 def create_exam(request: ExamRequest, current_user: User = Depends(require_role(["teacher"])),
                 db: Session = Depends(get_db)):
     verify_teacher_assignment(request.group_subject_id, current_user.id, db)
-
     exam = Exam(
         group_subject_id=request.group_subject_id,
         title=request.title,
@@ -135,7 +153,6 @@ def create_exam(request: ExamRequest, current_user: User = Depends(require_role(
 def update_exam(exam_id: int, request: ExamRequest, current_user: User = Depends(require_role(["teacher"])),
                 db: Session = Depends(get_db)):
     exam = verify_teacher_exam(exam_id, current_user.id, db)
-
     exam.title = request.title
     exam.description = request.description
     exam.exam_date = request.exam_date
@@ -147,58 +164,59 @@ def update_exam(exam_id: int, request: ExamRequest, current_user: User = Depends
 
 @router.get("/homework")
 def get_my_homework(current_user: User = Depends(require_role(["teacher"])), db: Session = Depends(get_db)):
-    return [
-        {
-            "id": h.id,
-            "title": h.title,
-            "due_date": h.due_date,
-            "max_points": h.max_points,
-            "subject": h.group_subject.subject.name,
-            "group": h.group_subject.group.name,
-            "group_subject_id": h.group_subject_id
-        } for h in current_user.group_subjects for h in h.homework
-    ]
+    homework_list = db.query(Homework).options(
+        joinedload(Homework.group_subject).joinedload(GroupSubject.group),
+        joinedload(Homework.group_subject).joinedload(GroupSubject.subject)
+    ).join(GroupSubject).filter(GroupSubject.teacher_id == current_user.id).all()
+
+    return [{
+        "id": h.id,
+        "title": h.title,
+        "due_date": h.due_date,
+        "max_points": h.max_points,
+        "subject": h.group_subject.subject.name,
+        "group": h.group_subject.group.name,
+        "group_subject_id": h.group_subject_id
+    } for h in homework_list]
 
 
 @router.get("/exams")
 def get_my_exams(current_user: User = Depends(require_role(["teacher"])), db: Session = Depends(get_db)):
-    return [
-        {
-            "id": e.id,
-            "title": e.title,
-            "exam_date": e.exam_date,
-            "max_points": e.max_points,
-            "subject": e.group_subject.subject.name,
-            "group": e.group_subject.group.name,
-            "group_subject_id": e.group_subject_id
-        } for gs in current_user.group_subjects for e in gs.exams
-    ]
+    exam_list = db.query(Exam).options(
+        joinedload(Exam.group_subject).joinedload(GroupSubject.group),
+        joinedload(Exam.group_subject).joinedload(GroupSubject.subject)
+    ).join(GroupSubject).filter(GroupSubject.teacher_id == current_user.id).all()
+
+    return [{
+        "id": e.id,
+        "title": e.title,
+        "exam_date": e.exam_date,
+        "max_points": e.max_points,
+        "subject": e.group_subject.subject.name,
+        "group": e.group_subject.group.name,
+        "group_subject_id": e.group_subject_id
+    } for e in exam_list]
 
 
 @router.get("/homework/{homework_id}/grading-table")
 def get_grading_table(homework_id: int, current_user: User = Depends(require_role(["teacher"])),
                       db: Session = Depends(get_db)):
     homework = verify_teacher_homework(homework_id, current_user.id, db)
-
-    students = homework.group_subject.group.students
+    students = db.query(Student).options(joinedload(Student.user)).filter(
+        Student.group_id == homework.group_subject.group_id
+    ).all()
     grade_map = {g.student_id: g for g in homework.grades}
 
     return {
-        "homework": {
-            "id": homework.id,
-            "title": homework.title,
-            "max_points": homework.max_points
-        },
-        "students": [
-            {
-                "student_id": s.id,
-                "name": s.user.full_name,
-                "grade": {
-                    "points": grade_map[s.id].points if s.id in grade_map else None,
-                    "comment": grade_map[s.id].comment if s.id in grade_map else ""
-                }
-            } for s in students
-        ]
+        "homework": {"id": homework.id, "title": homework.title, "max_points": homework.max_points},
+        "students": [{
+            "student_id": s.id,
+            "name": s.user.full_name,
+            "grade": {
+                "points": grade_map[s.id].points if s.id in grade_map else None,
+                "comment": grade_map[s.id].comment if s.id in grade_map else ""
+            }
+        } for s in students]
     }
 
 
@@ -206,76 +224,152 @@ def get_grading_table(homework_id: int, current_user: User = Depends(require_rol
 def get_exam_grading_table(exam_id: int, current_user: User = Depends(require_role(["teacher"])),
                            db: Session = Depends(get_db)):
     exam = verify_teacher_exam(exam_id, current_user.id, db)
-
-    students = exam.group_subject.group.students
+    students = db.query(Student).options(joinedload(Student.user)).filter(
+        Student.group_id == exam.group_subject.group_id
+    ).all()
     grade_map = {g.student_id: g for g in exam.grades}
 
     return {
-        "exam": {
-            "id": exam.id,
-            "title": exam.title,
-            "max_points": exam.max_points
-        },
-        "students": [
-            {
-                "student_id": s.id,
-                "name": s.user.full_name,
-                "grade": {
-                    "points": grade_map[s.id].points if s.id in grade_map else None,
-                    "comment": grade_map[s.id].comment if s.id in grade_map else ""
-                }
-            } for s in students
-        ]
+        "exam": {"id": exam.id, "title": exam.title, "max_points": exam.max_points},
+        "students": [{
+            "student_id": s.id,
+            "name": s.user.full_name,
+            "grade": {
+                "points": grade_map[s.id].points if s.id in grade_map else None,
+                "comment": grade_map[s.id].comment if s.id in grade_map else ""
+            }
+        } for s in students]
     }
 
 
-@router.post("/bulk-grade")
-def bulk_grade(request: BulkGradeRequest, current_user: User = Depends(require_role(["teacher"])),
-               db: Session = Depends(get_db)):
-    if request.homework_id:
-        homework = verify_teacher_homework(request.homework_id, current_user.id, db)
-        for grade_data in request.grades:
-            existing = db.query(HomeworkGrade).filter(
-                HomeworkGrade.homework_id == request.homework_id,
-                HomeworkGrade.student_id == grade_data.student_id
-            ).first()
+@router.get("/attendance-table")
+def get_attendance_table(group_subject_id: int, start_date: Optional[date] = None, end_date: Optional[date] = None,
+                         current_user: User = Depends(require_role(["teacher"])), db: Session = Depends(get_db)):
+    # Verify teacher is assigned to this group-subject
+    assignment = verify_teacher_assignment(group_subject_id, current_user.id, db)
 
-            if existing:
-                existing.points = grade_data.points
-                existing.comment = grade_data.comment
-                existing.graded_at = datetime.utcnow()
-            else:
-                grade = HomeworkGrade(
-                    student_id=grade_data.student_id,
-                    homework_id=request.homework_id,
-                    points=grade_data.points,
-                    comment=grade_data.comment
-                )
-                db.add(grade)
+    # Get all students in the group
+    students = db.query(Student).options(joinedload(Student.user)).filter(
+        Student.group_id == assignment.group_id
+    ).all()
 
-    elif request.exam_id:
-        exam = verify_teacher_exam(request.exam_id, current_user.id, db)
-        for grade_data in request.grades:
-            existing = db.query(ExamGrade).filter(
-                ExamGrade.exam_id == request.exam_id,
-                ExamGrade.student_id == grade_data.student_id
-            ).first()
+    # Build attendance query with date filtering
+    attendance_query = db.query(Attendance).filter(
+        Attendance.group_subject_id == group_subject_id
+    )
 
-            if existing:
-                existing.points = grade_data.points
-                existing.comment = grade_data.comment
-                existing.graded_at = datetime.utcnow()
-            else:
-                grade = ExamGrade(
-                    student_id=grade_data.student_id,
-                    exam_id=request.exam_id,
-                    points=grade_data.points,
-                    comment=grade_data.comment
-                )
-                db.add(grade)
+    if start_date:
+        attendance_query = attendance_query.filter(Attendance.date >= start_date)
+    if end_date:
+        attendance_query = attendance_query.filter(Attendance.date <= end_date)
+
+    # Get all attendance records for the date range
+    attendance_records = attendance_query.all()
+
+    # Organize attendance by student and date for easy lookup
+    attendance_map = {}
+    dates_set = set()
+
+    for record in attendance_records:
+        dates_set.add(record.date)
+        if record.student_id not in attendance_map:
+            attendance_map[record.student_id] = {}
+        attendance_map[record.student_id][record.date] = record.status
+
+    # Sort dates for consistent ordering
+    sorted_dates = sorted(list(dates_set))
+
+    # Build response with attendance data for each student
+    student_attendance = []
+    for student in students:
+        student_data = {
+            "student_id": student.id,
+            "name": student.user.full_name,
+            "attendance_by_date": {},
+            "summary": {"present": 0, "absent": 0, "late": 0, "excused": 0, "total_days": len(sorted_dates)}
+        }
+
+        # Fill in attendance for each date
+        for date in sorted_dates:
+            status = attendance_map.get(student.id, {}).get(date, "not_recorded")
+            student_data["attendance_by_date"][str(date)] = status
+
+            # Count attendance types for summary
+            if status in student_data["summary"]:
+                student_data["summary"][status] += 1
+
+        student_attendance.append(student_data)
+
+    return {
+        "group_subject": {
+            "id": assignment.id,
+            "group_name": assignment.group.name,
+            "subject_name": assignment.subject.name
+        },
+        "date_range": {
+            "start_date": start_date,
+            "end_date": end_date,
+            "total_dates": len(sorted_dates)
+        },
+        "dates": [str(d) for d in sorted_dates],
+        "students": student_attendance
+    }
+
+
+@router.post("/bulk-homework-grades")
+def bulk_homework_grades(request: BulkHomeworkGradeRequest, current_user: User = Depends(require_role(["teacher"])),
+                         db: Session = Depends(get_db)):
+    verify_teacher_homework(request.homework_id, current_user.id, db)
+
+    for grade_data in request.grades:
+        existing = db.query(HomeworkGrade).filter(
+            HomeworkGrade.homework_id == request.homework_id,
+            HomeworkGrade.student_id == grade_data.student_id
+        ).first()
+
+        if existing:
+            existing.points = grade_data.points
+            existing.comment = grade_data.comment
+            existing.graded_at = datetime.utcnow()
+        else:
+            grade = HomeworkGrade(
+                student_id=grade_data.student_id,
+                homework_id=request.homework_id,
+                points=grade_data.points,
+                comment=grade_data.comment
+            )
+            db.add(grade)
 
     db.commit()
-    return {"message": "Grades recorded"}
+    return {"message": "Homework grades recorded"}
+
+
+@router.post("/bulk-exam-grades")
+def bulk_exam_grades(request: BulkExamGradeRequest, current_user: User = Depends(require_role(["teacher"])),
+                     db: Session = Depends(get_db)):
+    verify_teacher_exam(request.exam_id, current_user.id, db)
+
+    for grade_data in request.grades:
+        existing = db.query(ExamGrade).filter(
+            ExamGrade.exam_id == request.exam_id,
+            ExamGrade.student_id == grade_data.student_id
+        ).first()
+
+        if existing:
+            existing.points = grade_data.points
+            existing.comment = grade_data.comment
+            existing.graded_at = datetime.utcnow()
+        else:
+            grade = ExamGrade(
+                student_id=grade_data.student_id,
+                exam_id=request.exam_id,
+                points=grade_data.points,
+                comment=grade_data.comment
+            )
+            db.add(grade)
+
+    db.commit()
+    return {"message": "Exam grades recorded"}
 
 
 @router.post("/bulk-attendance")
@@ -309,10 +403,8 @@ def bulk_attendance(request: BulkAttendanceRequest, current_user: User = Depends
 def delete_homework(homework_id: int, current_user: User = Depends(require_role(["teacher"])),
                     db: Session = Depends(get_db)):
     homework = verify_teacher_homework(homework_id, current_user.id, db)
-
     if homework.grades:
         raise HTTPException(status_code=400, detail="Cannot delete homework with existing grades")
-
     db.delete(homework)
     db.commit()
     return {"message": "Homework deleted"}
@@ -322,10 +414,8 @@ def delete_homework(homework_id: int, current_user: User = Depends(require_role(
 def delete_exam(exam_id: int, current_user: User = Depends(require_role(["teacher"])),
                 db: Session = Depends(get_db)):
     exam = verify_teacher_exam(exam_id, current_user.id, db)
-
     if exam.grades:
         raise HTTPException(status_code=400, detail="Cannot delete exam with existing grades")
-
     db.delete(exam)
     db.commit()
     return {"message": "Exam deleted"}
@@ -334,7 +424,9 @@ def delete_exam(exam_id: int, current_user: User = Depends(require_role(["teache
 @router.get("/groups/{group_id}/students")
 def get_group_students(group_id: int, current_user: User = Depends(require_role(["teacher"])),
                        db: Session = Depends(get_db)):
-    assignment = db.query(GroupSubject).filter(
+    assignment = db.query(GroupSubject).options(
+        joinedload(GroupSubject.group).selectinload(Group.students).joinedload(Student.user)
+    ).filter(
         GroupSubject.group_id == group_id,
         GroupSubject.teacher_id == current_user.id
     ).first()
@@ -342,10 +434,4 @@ def get_group_students(group_id: int, current_user: User = Depends(require_role(
     if not assignment:
         raise HTTPException(status_code=403, detail="Not assigned to this group")
 
-    return [
-        {
-            "id": s.id,
-            "name": s.user.full_name,
-            "phone": s.user.phone
-        } for s in assignment.group.students
-    ]
+    return [{"id": s.id, "name": s.user.full_name, "phone": s.user.phone} for s in assignment.group.students]

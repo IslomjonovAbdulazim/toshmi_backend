@@ -1,21 +1,30 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from datetime import datetime
 from app.database import get_db
-from app.models.models import User, Student, Homework, Exam
+from app.models.models import User, Student, Homework, Exam, GroupSubject
 from app.core.security import require_role
 
 router = APIRouter()
 
 
 def get_children(current_user: User, db: Session):
-    return db.query(Student).join(Student.user).filter(
-        Student.parent_phone == current_user.phone
-    ).all()
+    return db.query(Student).options(
+        joinedload(Student.user),
+        joinedload(Student.group)
+    ).filter(Student.parent_phone == current_user.phone).all()
 
 
 def get_child_or_404(child_id: int, current_user: User, db: Session):
-    child = db.query(Student).join(Student.user).filter(
+    child = db.query(Student).options(
+        joinedload(Student.user),
+        joinedload(Student.group),
+        selectinload(Student.homework_grades),
+        selectinload(Student.exam_grades),
+        selectinload(Student.attendance_records),
+        selectinload(Student.payment_records),
+        selectinload(Student.monthly_payments)
+    ).filter(
         Student.id == child_id,
         Student.parent_phone == current_user.phone
     ).first()
@@ -27,14 +36,12 @@ def get_child_or_404(child_id: int, current_user: User, db: Session):
 @router.get("/children")
 def list_children(current_user: User = Depends(require_role(["parent"])), db: Session = Depends(get_db)):
     children = get_children(current_user, db)
-    return [
-        {
-            "id": child.id,
-            "name": child.user.full_name,
-            "group_name": child.group.name,
-            "graduation_year": child.graduation_year
-        } for child in children
-    ]
+    return [{
+        "id": child.id,
+        "name": child.user.full_name,
+        "group_name": child.group.name,
+        "graduation_year": child.graduation_year
+    } for child in children]
 
 
 @router.get("/children/{child_id}/homework")
@@ -42,27 +49,28 @@ def get_child_homework(child_id: int, current_user: User = Depends(require_role(
                        db: Session = Depends(get_db)):
     child = get_child_or_404(child_id, current_user, db)
 
-    homework = db.query(Homework).join(Homework.group_subject).filter(
+    homework = db.query(Homework).options(
+        joinedload(Homework.group_subject).joinedload(GroupSubject.subject),
+        joinedload(Homework.group_subject).joinedload(GroupSubject.teacher)
+    ).filter(
         Homework.group_subject.has(group_id=child.group_id)
     ).all()
 
     grade_map = {g.homework_id: g for g in child.homework_grades}
 
-    return [
-        {
-            "id": h.id,
-            "title": h.title,
-            "description": h.description,
-            "due_date": h.due_date,
-            "max_points": h.max_points,
-            "subject": h.group_subject.subject.name,
-            "teacher": h.group_subject.teacher.full_name,
-            "grade": {
-                "points": grade_map[h.id].points if h.id in grade_map else None,
-                "comment": grade_map[h.id].comment if h.id in grade_map else ""
-            }
-        } for h in homework
-    ]
+    return [{
+        "id": h.id,
+        "title": h.title,
+        "description": h.description,
+        "due_date": h.due_date,
+        "max_points": h.max_points,
+        "subject": h.group_subject.subject.name,
+        "teacher": h.group_subject.teacher.full_name,
+        "grade": {
+            "points": grade_map[h.id].points if h.id in grade_map else None,
+            "comment": grade_map[h.id].comment if h.id in grade_map else ""
+        }
+    } for h in homework]
 
 
 @router.get("/children/{child_id}/grades")
@@ -70,29 +78,33 @@ def get_child_grades(child_id: int, current_user: User = Depends(require_role(["
                      db: Session = Depends(get_db)):
     child = get_child_or_404(child_id, current_user, db)
 
+    homework_grades = db.query(Student).options(
+        selectinload(Student.homework_grades).joinedload("homework").joinedload("group_subject").joinedload(GroupSubject.subject)
+    ).filter(Student.id == child_id).first().homework_grades
+
+    exam_grades = db.query(Student).options(
+        selectinload(Student.exam_grades).joinedload("exam").joinedload("group_subject").joinedload(GroupSubject.subject)
+    ).filter(Student.id == child_id).first().exam_grades
+
     return {
-        "homework_grades": [
-            {
-                "homework_title": g.homework.title,
-                "subject": g.homework.group_subject.subject.name,
-                "points": g.points,
-                "max_points": g.homework.max_points,
-                "percentage": round((g.points / g.homework.max_points) * 100, 1),
-                "comment": g.comment,
-                "graded_at": g.graded_at
-            } for g in child.homework_grades
-        ],
-        "exam_grades": [
-            {
-                "exam_title": g.exam.title,
-                "subject": g.exam.group_subject.subject.name,
-                "points": g.points,
-                "max_points": g.exam.max_points,
-                "percentage": round((g.points / g.exam.max_points) * 100, 1),
-                "comment": g.comment,
-                "graded_at": g.graded_at
-            } for g in child.exam_grades
-        ]
+        "homework_grades": [{
+            "homework_title": g.homework.title,
+            "subject": g.homework.group_subject.subject.name,
+            "points": g.points,
+            "max_points": g.homework.max_points,
+            "percentage": round((g.points / g.homework.max_points) * 100, 1),
+            "comment": g.comment,
+            "graded_at": g.graded_at
+        } for g in homework_grades],
+        "exam_grades": [{
+            "exam_title": g.exam.title,
+            "subject": g.exam.group_subject.subject.name,
+            "points": g.points,
+            "max_points": g.exam.max_points,
+            "percentage": round((g.points / g.exam.max_points) * 100, 1),
+            "comment": g.comment,
+            "graded_at": g.graded_at
+        } for g in exam_grades]
     }
 
 
@@ -101,14 +113,17 @@ def get_child_attendance(child_id: int, current_user: User = Depends(require_rol
                          db: Session = Depends(get_db)):
     child = get_child_or_404(child_id, current_user, db)
 
-    return [
-        {
-            "date": a.date,
-            "status": a.status,
-            "subject": a.group_subject.subject.name,
-            "teacher": a.group_subject.teacher.full_name
-        } for a in child.attendance_records
-    ]
+    attendance = db.query(Student).options(
+        selectinload(Student.attendance_records).joinedload("group_subject").joinedload(GroupSubject.subject),
+        selectinload(Student.attendance_records).joinedload("group_subject").joinedload(GroupSubject.teacher)
+    ).filter(Student.id == child_id).first().attendance_records
+
+    return [{
+        "date": a.date,
+        "status": a.status,
+        "subject": a.group_subject.subject.name,
+        "teacher": a.group_subject.teacher.full_name
+    } for a in attendance]
 
 
 @router.get("/children/{child_id}/payments")
@@ -117,23 +132,19 @@ def get_child_payments(child_id: int, current_user: User = Depends(require_role(
     child = get_child_or_404(child_id, current_user, db)
 
     return {
-        "payment_records": [
-            {
-                "amount": r.amount,
-                "payment_date": r.payment_date,
-                "payment_method": r.payment_method,
-                "description": r.description
-            } for r in child.payment_records
-        ],
-        "monthly_status": [
-            {
-                "month": m.month,
-                "year": m.year,
-                "paid_amount": m.paid_amount,
-                "is_completed": m.is_completed,
-                "due_date": m.due_date
-            } for m in child.monthly_payments
-        ]
+        "payment_records": [{
+            "amount": r.amount,
+            "payment_date": r.payment_date,
+            "payment_method": r.payment_method,
+            "description": r.description
+        } for r in child.payment_records],
+        "monthly_status": [{
+            "month": m.month,
+            "year": m.year,
+            "paid_amount": m.paid_amount,
+            "is_completed": m.is_completed,
+            "due_date": m.due_date
+        } for m in child.monthly_payments]
     }
 
 
@@ -143,7 +154,7 @@ def get_dashboard(current_user: User = Depends(require_role(["parent"])), db: Se
 
     dashboard_data = []
     for child in children:
-        upcoming_homework = db.query(Homework).join(Homework.group_subject).filter(
+        upcoming_homework = db.query(Homework).filter(
             Homework.group_subject.has(group_id=child.group_id),
             Homework.due_date > datetime.utcnow()
         ).count()

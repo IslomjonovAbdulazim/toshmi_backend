@@ -29,6 +29,7 @@ class UpdateProfileRequest(BaseModel):
 
 @router.post("/login")
 def login(request: LoginRequest, db: Session = Depends(get_db)):
+    # Simple query without joinedload to avoid relationship issues
     user = db.query(User).filter(
         User.phone == request.phone,
         User.role == request.role,

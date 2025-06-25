@@ -3,7 +3,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.database import get_db
 from app.models.models import User, Student
@@ -36,9 +36,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    user = db.query(User).options(joinedload(User.profile_image)).filter(
-        User.id == user_id, User.is_active == True
-    ).first()
+    user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
@@ -49,7 +47,6 @@ def require_role(allowed_roles: list):
         if current_user.role not in allowed_roles:
             raise HTTPException(status_code=403, detail="Permission denied")
         return current_user
-
     return role_checker
 
 
@@ -57,27 +54,7 @@ def get_student_by_user(user: User, db: Session):
     if user.role != "student":
         raise HTTPException(status_code=403, detail="Student access required")
 
-    student = db.query(Student).options(
-        joinedload(Student.group),
-        joinedload(Student.user)
-    ).filter(Student.user_id == user.id).first()
-
+    student = db.query(Student).filter(Student.user_id == user.id).first()
     if not student:
         raise HTTPException(status_code=404, detail="Student profile not found")
     return student
-
-
-def verify_admin_password(plain_password: str, stored_password: str) -> bool:
-    return plain_password == stored_password
-
-
-def verify_user_password(plain_password: str, hashed_password: str, role: str) -> bool:
-    if role == "admin":
-        return verify_admin_password(plain_password, hashed_password)
-    return verify_password(plain_password, hashed_password)
-
-
-def get_password_hash(password: str, role: str) -> str:
-    if role == "admin":
-        return password
-    return hash_password(password)

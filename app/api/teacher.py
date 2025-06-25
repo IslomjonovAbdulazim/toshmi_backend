@@ -55,12 +55,6 @@ class BulkAttendanceRequest(BaseModel):
     records: List[AttendanceRecord]
 
 
-class AttendanceTableRequest(BaseModel):
-    group_subject_id: int
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-
-
 def verify_teacher_assignment(group_subject_id: int, teacher_id: int, db: Session):
     assignment = db.query(GroupSubject).options(
         joinedload(GroupSubject.group),
@@ -105,7 +99,8 @@ def verify_teacher_exam(exam_id: int, teacher_id: int, db: Session):
 @router.post("/homework")
 def create_homework(request: HomeworkRequest, current_user: User = Depends(require_role(["teacher"])),
                     db: Session = Depends(get_db)):
-    verify_teacher_assignment(request.group_subject_id, current_user.id, db)
+    assignment = verify_teacher_assignment(request.group_subject_id, current_user.id, db)
+
     homework = Homework(
         group_subject_id=request.group_subject_id,
         title=request.title,
@@ -135,7 +130,8 @@ def update_homework(homework_id: int, request: HomeworkRequest,
 @router.post("/exams")
 def create_exam(request: ExamRequest, current_user: User = Depends(require_role(["teacher"])),
                 db: Session = Depends(get_db)):
-    verify_teacher_assignment(request.group_subject_id, current_user.id, db)
+    assignment = verify_teacher_assignment(request.group_subject_id, current_user.id, db)
+
     exam = Exam(
         group_subject_id=request.group_subject_id,
         title=request.title,
@@ -245,15 +241,12 @@ def get_exam_grading_table(exam_id: int, current_user: User = Depends(require_ro
 @router.get("/attendance-table")
 def get_attendance_table(group_subject_id: int, start_date: Optional[date] = None, end_date: Optional[date] = None,
                          current_user: User = Depends(require_role(["teacher"])), db: Session = Depends(get_db)):
-    # Verify teacher is assigned to this group-subject
     assignment = verify_teacher_assignment(group_subject_id, current_user.id, db)
 
-    # Get all students in the group
     students = db.query(Student).options(joinedload(Student.user)).filter(
         Student.group_id == assignment.group_id
     ).all()
 
-    # Build attendance query with date filtering
     attendance_query = db.query(Attendance).filter(
         Attendance.group_subject_id == group_subject_id
     )
@@ -263,10 +256,8 @@ def get_attendance_table(group_subject_id: int, start_date: Optional[date] = Non
     if end_date:
         attendance_query = attendance_query.filter(Attendance.date <= end_date)
 
-    # Get all attendance records for the date range
     attendance_records = attendance_query.all()
 
-    # Organize attendance by student and date for easy lookup
     attendance_map = {}
     dates_set = set()
 
@@ -276,10 +267,8 @@ def get_attendance_table(group_subject_id: int, start_date: Optional[date] = Non
             attendance_map[record.student_id] = {}
         attendance_map[record.student_id][record.date] = record.status
 
-    # Sort dates for consistent ordering
     sorted_dates = sorted(list(dates_set))
 
-    # Build response with attendance data for each student
     student_attendance = []
     for student in students:
         student_data = {
@@ -289,12 +278,10 @@ def get_attendance_table(group_subject_id: int, start_date: Optional[date] = Non
             "summary": {"present": 0, "absent": 0, "late": 0, "excused": 0, "total_days": len(sorted_dates)}
         }
 
-        # Fill in attendance for each date
         for date in sorted_dates:
             status = attendance_map.get(student.id, {}).get(date, "not_recorded")
             student_data["attendance_by_date"][str(date)] = status
 
-            # Count attendance types for summary
             if status in student_data["summary"]:
                 student_data["summary"][status] += 1
 
@@ -319,7 +306,7 @@ def get_attendance_table(group_subject_id: int, start_date: Optional[date] = Non
 @router.post("/bulk-homework-grades")
 def bulk_homework_grades(request: BulkHomeworkGradeRequest, current_user: User = Depends(require_role(["teacher"])),
                          db: Session = Depends(get_db)):
-    verify_teacher_homework(request.homework_id, current_user.id, db)
+    homework = verify_teacher_homework(request.homework_id, current_user.id, db)
 
     for grade_data in request.grades:
         existing = db.query(HomeworkGrade).filter(
@@ -347,7 +334,7 @@ def bulk_homework_grades(request: BulkHomeworkGradeRequest, current_user: User =
 @router.post("/bulk-exam-grades")
 def bulk_exam_grades(request: BulkExamGradeRequest, current_user: User = Depends(require_role(["teacher"])),
                      db: Session = Depends(get_db)):
-    verify_teacher_exam(request.exam_id, current_user.id, db)
+    exam = verify_teacher_exam(request.exam_id, current_user.id, db)
 
     for grade_data in request.grades:
         existing = db.query(ExamGrade).filter(
@@ -375,7 +362,7 @@ def bulk_exam_grades(request: BulkExamGradeRequest, current_user: User = Depends
 @router.post("/bulk-attendance")
 def bulk_attendance(request: BulkAttendanceRequest, current_user: User = Depends(require_role(["teacher"])),
                     db: Session = Depends(get_db)):
-    verify_teacher_assignment(request.group_subject_id, current_user.id, db)
+    assignment = verify_teacher_assignment(request.group_subject_id, current_user.id, db)
 
     for record in request.records:
         existing = db.query(Attendance).filter(

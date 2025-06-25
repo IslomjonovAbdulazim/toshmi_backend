@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session, joinedload, selectinload
 from datetime import datetime
 from app.database import get_db
-from app.models.models import User, Homework, Exam, Schedule, GroupSubject
+from app.models.models import User, Homework, Exam, Schedule, GroupSubject, ExamGrade, HomeworkGrade
 from app.core.security import require_role, get_student_by_user
 
 router = APIRouter()

@@ -7,11 +7,15 @@ from app.core.config import settings
 engine = create_engine(
     settings.DATABASE_URL,
     poolclass=QueuePool,
-    pool_size=20,
-    max_overflow=0,
+    pool_size=10,
+    max_overflow=20,
     pool_pre_ping=True,
-    pool_recycle=300,
-    echo=False
+    pool_recycle=3600,
+    echo=False,
+    connect_args={
+        "connect_timeout": 10,
+        "application_name": "school_management"
+    }
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

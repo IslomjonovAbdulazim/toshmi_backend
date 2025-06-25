@@ -4,38 +4,47 @@ from datetime import datetime
 from app.database import Base
 
 
-# Add this to your app/models/models.py to fix the relationship issue
-
-# Update the User class to fix the foreign key ambiguity:
-
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
     phone = Column(String, unique=True, index=True)
     password_hash = Column(String)
-    role = Column(String)
+    role = Column(String, index=True)
     first_name = Column(String)
     last_name = Column(String)
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    profile_image_id = Column(Integer, ForeignKey("files.id"), nullable=True)
+    profile_image_id = Column(Integer, ForeignKey("files.id"))
 
-    # Fixed relationships with explicit foreign_keys
-    profile_image = relationship("File", foreign_keys=[profile_image_id], post_update=True)
+    profile_image = relationship("File", foreign_keys=[profile_image_id])
     student_profile = relationship("Student", back_populates="user", uselist=False)
     group_subjects = relationship("GroupSubject", back_populates="teacher")
-    news_authored = relationship("News", back_populates="author")
-
-    # If you have uploaded files relationship, specify foreign keys explicitly
-    uploaded_files = relationship("File", foreign_keys="File.uploaded_by", back_populates="uploader")
+    notifications = relationship("Notification", back_populates="user", order_by="desc(Notification.created_at)")
 
     @property
     def full_name(self):
         return f"{self.first_name} {self.last_name}"
 
 
-# Also update the File class to fix the relationship:
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    title = Column(String)
+    message = Column(Text)
+    type = Column(String, index=True)
+    is_read = Column(Boolean, default=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    user = relationship("User", back_populates="notifications")
+
+    __table_args__ = (
+        Index('idx_notification_user_read', 'user_id', 'is_read'),
+        Index('idx_notification_type_date', 'type', 'created_at'),
+    )
+
 
 class File(Base):
     __tablename__ = "files"
@@ -47,10 +56,7 @@ class File(Base):
     uploaded_by = Column(Integer, ForeignKey("users.id"))
     upload_date = Column(DateTime, default=datetime.utcnow)
     related_id = Column(Integer)
-    file_type = Column(String)
-
-    # Fixed relationship with explicit foreign_keys
-    uploader = relationship("User", foreign_keys=[uploaded_by], back_populates="uploaded_files")
+    file_type = Column(String, index=True)
 
 
 class Group(Base):
@@ -71,7 +77,6 @@ class Subject(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)
     code = Column(String, unique=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
 
     group_subjects = relationship("GroupSubject", back_populates="subject")
 
@@ -84,7 +89,6 @@ class Student(Base):
     group_id = Column(Integer, ForeignKey("groups.id"), index=True)
     parent_phone = Column(String, index=True)
     graduation_year = Column(Integer, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="student_profile")
     group = relationship("Group", back_populates="students")
@@ -92,7 +96,6 @@ class Student(Base):
     exam_grades = relationship("ExamGrade", back_populates="student")
     attendance_records = relationship("Attendance", back_populates="student")
     payment_records = relationship("PaymentRecord", back_populates="student")
-    monthly_payments = relationship("MonthlyPayment", back_populates="student")
 
     __table_args__ = (
         Index('idx_student_group_parent', 'group_id', 'parent_phone'),
@@ -106,7 +109,6 @@ class GroupSubject(Base):
     group_id = Column(Integer, ForeignKey("groups.id"), index=True)
     subject_id = Column(Integer, ForeignKey("subjects.id"), index=True)
     teacher_id = Column(Integer, ForeignKey("users.id"), index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
 
     group = relationship("Group", back_populates="group_subjects")
     subject = relationship("Subject", back_populates="group_subjects")
@@ -118,7 +120,6 @@ class GroupSubject(Base):
 
     __table_args__ = (
         Index('idx_group_subject_unique', 'group_id', 'subject_id', unique=True),
-        Index('idx_teacher_assignments', 'teacher_id', 'group_id'),
     )
 
 
@@ -133,7 +134,7 @@ class Homework(Base):
     max_points = Column(Integer, default=100)
     external_links = Column(JSON, default=list)
     document_ids = Column(JSON, default=list)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     group_subject = relationship("GroupSubject", back_populates="homework")
     grades = relationship("HomeworkGrade", back_populates="homework")
@@ -154,14 +155,10 @@ class Exam(Base):
     max_points = Column(Integer, default=100)
     external_links = Column(JSON, default=list)
     document_ids = Column(JSON, default=list)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     group_subject = relationship("GroupSubject", back_populates="exams")
     grades = relationship("ExamGrade", back_populates="exam")
-
-    __table_args__ = (
-        Index('idx_exam_date', 'exam_date', 'group_subject_id'),
-    )
 
 
 class HomeworkGrade(Base):
@@ -172,7 +169,7 @@ class HomeworkGrade(Base):
     homework_id = Column(Integer, ForeignKey("homework.id"), index=True)
     points = Column(Integer)
     comment = Column(Text, default="")
-    graded_at = Column(DateTime, default=datetime.utcnow, index=True)
+    graded_at = Column(DateTime, default=datetime.utcnow)
 
     student = relationship("Student", back_populates="homework_grades")
     homework = relationship("Homework", back_populates="grades")
@@ -190,7 +187,7 @@ class ExamGrade(Base):
     exam_id = Column(Integer, ForeignKey("exams.id"), index=True)
     points = Column(Integer)
     comment = Column(Text, default="")
-    graded_at = Column(DateTime, default=datetime.utcnow, index=True)
+    graded_at = Column(DateTime, default=datetime.utcnow)
 
     student = relationship("Student", back_populates="exam_grades")
     exam = relationship("Exam", back_populates="grades")
@@ -207,38 +204,13 @@ class Attendance(Base):
     student_id = Column(Integer, ForeignKey("students.id"), index=True)
     group_subject_id = Column(Integer, ForeignKey("group_subjects.id"), index=True)
     date = Column(Date, index=True)
-    status = Column(String, index=True)  # present, absent, late, excused
-    created_at = Column(DateTime, default=datetime.utcnow)
+    status = Column(String, index=True)
 
     student = relationship("Student", back_populates="attendance_records")
     group_subject = relationship("GroupSubject", back_populates="attendance_records")
 
     __table_args__ = (
         Index('idx_attendance_unique', 'student_id', 'group_subject_id', 'date', unique=True),
-        Index('idx_attendance_date_status', 'date', 'status'),
-    )
-
-
-class TeacherAttendance(Base):
-    __tablename__ = "teacher_attendance"
-
-    id = Column(Integer, primary_key=True, index=True)
-    teacher_id = Column(Integer, ForeignKey("users.id"), index=True)
-    date = Column(Date, index=True)
-    status = Column(String, index=True)  # present, absent, sick, vacation, professional_development
-    check_in_time = Column(Time, nullable=True)
-    check_out_time = Column(Time, nullable=True)
-    notes = Column(Text, default="")
-    recorded_by = Column(Integer, ForeignKey("users.id"), index=True)  # Admin who recorded this
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    teacher = relationship("User", foreign_keys=[teacher_id], back_populates="teacher_attendance")
-    recorder = relationship("User", foreign_keys=[recorded_by])
-
-    __table_args__ = (
-        Index('idx_teacher_attendance_unique', 'teacher_id', 'date', unique=True),
-        Index('idx_teacher_attendance_date_status', 'date', 'status'),
-        Index('idx_teacher_attendance_monthly', 'teacher_id', 'date'),
     )
 
 
@@ -249,35 +221,11 @@ class PaymentRecord(Base):
     student_id = Column(Integer, ForeignKey("students.id"), index=True)
     amount = Column(Integer)
     payment_date = Column(Date, index=True)
-    payment_method = Column(String, default="cash", index=True)
+    payment_method = Column(String, default="cash")
     description = Column(String, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     student = relationship("Student", back_populates="payment_records")
-
-    __table_args__ = (
-        Index('idx_payment_student_date', 'student_id', 'payment_date'),
-    )
-
-
-class MonthlyPayment(Base):
-    __tablename__ = "monthly_payments"
-
-    id = Column(Integer, primary_key=True, index=True)
-    student_id = Column(Integer, ForeignKey("students.id"), index=True)
-    month = Column(Integer, index=True)
-    year = Column(Integer, index=True)
-    paid_amount = Column(Integer, default=0)
-    is_completed = Column(Boolean, default=False, index=True)
-    due_date = Column(Date, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    student = relationship("Student", back_populates="monthly_payments")
-
-    __table_args__ = (
-        Index('idx_monthly_payment_unique', 'student_id', 'month', 'year', unique=True),
-        Index('idx_monthly_payment_status', 'is_completed', 'due_date'),
-    )
 
 
 class News(Base):
@@ -286,18 +234,11 @@ class News(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String, index=True)
     content = Column(Text)
-    author_id = Column(Integer, ForeignKey("users.id"), index=True)
+    author_id = Column(Integer, ForeignKey("users.id"))
     external_links = Column(JSON, default=list)
     image_ids = Column(JSON, default=list)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
     is_published = Column(Boolean, default=True, index=True)
-
-    author = relationship("User", back_populates="news_authored")
-
-    __table_args__ = (
-        Index('idx_news_published_date', 'is_published', 'created_at'),
-    )
-
 
 
 class Schedule(Base):
@@ -305,15 +246,13 @@ class Schedule(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     group_subject_id = Column(Integer, ForeignKey("group_subjects.id"), index=True)
-    day = Column(Integer, index=True)  # 0=Monday, 6=Sunday
-    start_time = Column(Time, index=True)
+    day = Column(Integer, index=True)
+    start_time = Column(Time)
     end_time = Column(Time)
-    room = Column(String, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    room = Column(String)
 
     group_subject = relationship("GroupSubject", back_populates="schedules")
 
     __table_args__ = (
         Index('idx_schedule_day_time', 'day', 'start_time'),
-        Index('idx_schedule_group_day', 'group_subject_id', 'day'),
     )

@@ -138,6 +138,7 @@ def list_students(skip: int = 0, limit: int = 100, current_user: User = Depends(
         "user_id": s.user_id,
         "name": s.user.full_name,
         "phone": s.user.phone,
+        "group_id": s.group_id,  # Added this field for frontend filtering
         "group_name": s.group.name,
         "parent_phone": s.parent_phone,
         "graduation_year": s.graduation_year,

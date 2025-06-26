@@ -188,18 +188,6 @@ def update_student(student_id: int, request: UpdateStudentRequest,
     return {"message": "Student updated"}
 
 
-@router.delete("/students/{student_id}")
-def delete_student(student_id: int, current_user: User = Depends(require_role(["admin"])),
-                   db: Session = Depends(get_db)):
-    student = db.query(Student).options(joinedload(Student.user)).filter(Student.id == student_id).first()
-    if not student:
-        raise HTTPException(status_code=404, detail="Student not found")
-
-    student.user.is_active = False
-    db.commit()
-    return {"message": "Student deactivated"}
-
-
 @router.post("/teachers")
 def create_teacher(request: CreateUserRequest, current_user: User = Depends(require_role(["admin"])),
                    db: Session = Depends(get_db)):
@@ -251,17 +239,6 @@ def update_teacher(teacher_id: int, request: UpdateUserRequest,
     return {"message": "Teacher updated"}
 
 
-@router.delete("/teachers/{teacher_id}")
-def delete_teacher(teacher_id: int, current_user: User = Depends(require_role(["admin"])),
-                   db: Session = Depends(get_db)):
-    teacher = db.query(User).filter(User.id == teacher_id, User.role == "teacher").first()
-    if not teacher:
-        raise HTTPException(status_code=404, detail="Teacher not found")
-    teacher.is_active = False
-    db.commit()
-    return {"message": "Teacher deactivated"}
-
-
 @router.post("/parents")
 def create_parent(request: CreateUserRequest, current_user: User = Depends(require_role(["admin"])),
                   db: Session = Depends(get_db)):
@@ -285,17 +262,6 @@ def update_parent(parent_id: int, request: UpdateUserRequest,
     update_user(parent, request, db)
     db.commit()
     return {"message": "Parent updated"}
-
-
-@router.delete("/parents/{parent_id}")
-def delete_parent(parent_id: int, current_user: User = Depends(require_role(["admin"])),
-                  db: Session = Depends(get_db)):
-    parent = db.query(User).filter(User.id == parent_id, User.role == "parent").first()
-    if not parent:
-        raise HTTPException(status_code=404, detail="Parent not found")
-    parent.is_active = False
-    db.commit()
-    return {"message": "Parent deactivated"}
 
 
 @router.post("/groups")
@@ -538,3 +504,219 @@ def delete_news(news_id: int, current_user: User = Depends(require_role(["admin"
     db.delete(news)
     db.commit()
     return {"message": "News deleted"}
+
+
+@router.get("/payments/summary")
+def get_payments_summary(current_user: User = Depends(require_role(["admin"])),
+                         db: Session = Depends(get_db)):
+    """Get payment statistics and summary"""
+    from sqlalchemy import func
+
+    total_amount = db.query(func.sum(PaymentRecord.amount)).scalar() or 0
+    total_payments = db.query(PaymentRecord).count()
+
+    # Payment methods breakdown
+    payment_methods = db.query(
+        PaymentRecord.payment_method,
+        func.sum(PaymentRecord.amount).label('total'),
+        func.count(PaymentRecord.id).label('count')
+    ).group_by(PaymentRecord.payment_method).all()
+
+    # Recent payments
+    recent_payments = db.query(PaymentRecord).options(
+        joinedload(PaymentRecord.student).joinedload(Student.user)
+    ).order_by(PaymentRecord.created_at.desc()).limit(5).all()
+
+    return {
+        "total_amount": total_amount,
+        "total_payments": total_payments,
+        "payment_methods": [{
+            "method": pm.payment_method,
+            "total_amount": pm.total,
+            "count": pm.count
+        } for pm in payment_methods],
+        "recent_payments": [{
+            "id": p.id,
+            "student_name": p.student.user.full_name,
+            "amount": p.amount,
+            "payment_date": p.payment_date,
+            "payment_method": p.payment_method
+        } for p in recent_payments]
+    }
+
+
+@router.delete("/payments/{payment_id}")
+def delete_payment(payment_id: int, current_user: User = Depends(require_role(["admin"])),
+                   db: Session = Depends(get_db)):
+    """Delete payment record"""
+    payment = db.query(PaymentRecord).filter(PaymentRecord.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    db.delete(payment)
+    db.commit()
+    return {"message": "Payment deleted"}
+
+
+def hard_delete_user_and_dependencies(user_id: int, db: Session):
+    """Hard delete user and all related data"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return False
+
+    # Delete student profile and related data if exists
+    student = db.query(Student).filter(Student.user_id == user_id).first()
+    if student:
+        # Delete student's homework grades, exam grades, attendance, payments
+        from app.models.models import HomeworkGrade, ExamGrade, Attendance
+        db.query(HomeworkGrade).filter(HomeworkGrade.student_id == student.id).delete()
+        db.query(ExamGrade).filter(ExamGrade.student_id == student.id).delete()
+        db.query(Attendance).filter(Attendance.student_id == student.id).delete()
+        db.query(PaymentRecord).filter(PaymentRecord.student_id == student.id).delete()
+        db.delete(student)
+
+    # Delete teacher's assignments if exists
+    if user.role == "teacher":
+        # Only unassign, don't delete the group-subjects themselves
+        assignments = db.query(GroupSubject).filter(GroupSubject.teacher_id == user_id).all()
+        for assignment in assignments:
+            assignment.teacher_id = None
+
+    # Delete user's notifications
+    from app.models.models import Notification
+    db.query(Notification).filter(Notification.user_id == user_id).delete()
+
+    # Delete user's files
+    from app.models.models import File
+    db.query(File).filter(File.uploaded_by == user_id).delete()
+
+    # Finally delete the user
+    db.delete(user)
+    return True
+
+
+# REPLACE the existing delete_student function with this:
+@router.delete("/students/{student_id}")
+def delete_student(student_id: int, current_user: User = Depends(require_role(["admin"])),
+                   db: Session = Depends(get_db)):
+    student = db.query(Student).options(joinedload(Student.user)).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    # Hard delete the student and user
+    if hard_delete_user_and_dependencies(student.user_id, db):
+        db.commit()
+        return {"message": "Student deleted completely"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to delete student")
+
+
+# REPLACE the existing delete_teacher function with this:
+@router.delete("/teachers/{teacher_id}")
+def delete_teacher(teacher_id: int, current_user: User = Depends(require_role(["admin"])),
+                   db: Session = Depends(get_db)):
+    teacher = db.query(User).filter(User.id == teacher_id, User.role == "teacher").first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
+    # Hard delete the teacher and unassign from subjects
+    if hard_delete_user_and_dependencies(teacher_id, db):
+        db.commit()
+        return {"message": "Teacher deleted completely"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to delete teacher")
+
+
+# REPLACE the existing delete_parent function with this:
+@router.delete("/parents/{parent_id}")
+def delete_parent(parent_id: int, current_user: User = Depends(require_role(["admin"])),
+                  db: Session = Depends(get_db)):
+    parent = db.query(User).filter(User.id == parent_id, User.role == "parent").first()
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent not found")
+
+    # Hard delete the parent
+    if hard_delete_user_and_dependencies(parent_id, db):
+        db.commit()
+        return {"message": "Parent deleted completely"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to delete parent")
+
+
+# ADD THESE NEW PAYMENT ENDPOINTS at the end of the file:
+
+@router.get("/payments")
+def list_all_payments(skip: int = 0, limit: int = 100, student_id: Optional[int] = None,
+                      payment_method: Optional[str] = None,
+                      current_user: User = Depends(require_role(["admin"])),
+                      db: Session = Depends(get_db)):
+    """Get all payment records with optional filtering"""
+    query = db.query(PaymentRecord).options(
+        joinedload(PaymentRecord.student).joinedload(Student.user),
+        joinedload(PaymentRecord.student).joinedload(Student.group)
+    )
+
+    if student_id:
+        query = query.filter(PaymentRecord.student_id == student_id)
+    if payment_method:
+        query = query.filter(PaymentRecord.payment_method == payment_method)
+
+    payments = query.order_by(PaymentRecord.payment_date.desc()).offset(skip).limit(limit).all()
+
+    return [{
+        "id": p.id,
+        "student_id": p.student_id,
+        "student_name": p.student.user.full_name,
+        "student_phone": p.student.user.phone,
+        "group_name": p.student.group.name,
+        "amount": p.amount,
+        "payment_date": p.payment_date,
+        "payment_method": p.payment_method,
+        "description": p.description,
+        "created_at": p.created_at
+    } for p in payments]
+
+
+@router.get("/payments/{payment_id}")
+def get_payment(payment_id: int, current_user: User = Depends(require_role(["admin"])),
+                db: Session = Depends(get_db)):
+    """Get specific payment record"""
+    payment = db.query(PaymentRecord).options(
+        joinedload(PaymentRecord.student).joinedload(Student.user),
+        joinedload(PaymentRecord.student).joinedload(Student.group)
+    ).filter(PaymentRecord.id == payment_id).first()
+
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    return {
+        "id": payment.id,
+        "student_id": payment.student_id,
+        "student_name": payment.student.user.full_name,
+        "student_phone": payment.student.user.phone,
+        "group_name": payment.student.group.name,
+        "amount": payment.amount,
+        "payment_date": payment.payment_date,
+        "payment_method": payment.payment_method,
+        "description": payment.description,
+        "created_at": payment.created_at
+    }
+
+
+@router.put("/payments/{payment_id}")
+def update_payment(payment_id: int, request: PaymentRequest,
+                   current_user: User = Depends(require_role(["admin"])),
+                   db: Session = Depends(get_db)):
+    """Update payment record"""
+    payment = db.query(PaymentRecord).filter(PaymentRecord.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    payment.student_id = request.student_id
+    payment.amount = request.amount
+    payment.payment_date = request.payment_date
+    payment.payment_method = request.payment_method
+    payment.description = request.description
+
+    db.commit()
+    return {"message": "Payment updated"}

@@ -6,7 +6,8 @@ from datetime import date
 from app.database import get_db
 from app.models.models import User, Student, Group, Subject, GroupSubject, PaymentRecord, News, Schedule
 from app.core.security import require_role, hash_password
-
+from app.models.models import Schedule
+from datetime import time
 router = APIRouter()
 
 
@@ -1020,3 +1021,172 @@ def get_unassigned_subjects(current_user: User = Depends(require_role(["admin"])
             "code": assignment.subject.code
         }
     } for assignment in unassigned]
+
+
+@router.post("/schedule")
+def create_schedule(request: ScheduleRequest, current_user: User = Depends(require_role(["admin"])),
+                    db: Session = Depends(get_db)):
+    """Create a new schedule entry"""
+    # Verify group_subject exists
+    group_subject = db.query(GroupSubject).filter(GroupSubject.id == request.group_subject_id).first()
+    if not group_subject:
+        raise HTTPException(status_code=404, detail="Group-subject assignment not found")
+
+    # Validate day (0-6)
+    if not 0 <= request.day <= 6:
+        raise HTTPException(status_code=400, detail="Day must be between 0 (Monday) and 6 (Sunday)")
+
+    # Parse time strings
+    try:
+        start_time = time.fromisoformat(request.start_time)
+        end_time = time.fromisoformat(request.end_time)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid time format. Use HH:MM (e.g., '09:00')")
+
+    # Validate time logic
+    if start_time >= end_time:
+        raise HTTPException(status_code=400, detail="Start time must be before end time")
+
+    # Check for schedule conflicts (same group, same day, overlapping times)
+    existing_schedules = db.query(Schedule).join(GroupSubject).filter(
+        GroupSubject.group_id == group_subject.group_id,
+        Schedule.day == request.day
+    ).all()
+
+    for existing in existing_schedules:
+        if (start_time < existing.end_time and end_time > existing.start_time):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Schedule conflict with existing class from {existing.start_time} to {existing.end_time}"
+            )
+
+    # Create schedule
+    schedule = Schedule(
+        group_subject_id=request.group_subject_id,
+        day=request.day,
+        start_time=start_time,
+        end_time=end_time,
+        room=request.room
+    )
+
+    db.add(schedule)
+    db.commit()
+    db.refresh(schedule)
+
+    return {"message": "Schedule created", "id": schedule.id}
+
+
+@router.get("/schedule")
+def list_schedules(current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
+    """List all schedules"""
+    schedules = db.query(Schedule).options(
+        joinedload(Schedule.group_subject).joinedload(GroupSubject.group),
+        joinedload(Schedule.group_subject).joinedload(GroupSubject.subject),
+        joinedload(Schedule.group_subject).joinedload(GroupSubject.teacher)
+    ).all()
+
+    return [{
+        "id": s.id,
+        "group_subject_id": s.group_subject_id,
+        "group_name": s.group_subject.group.name,
+        "subject_name": s.group_subject.subject.name,
+        "teacher_name": s.group_subject.teacher.full_name if s.group_subject.teacher else "No teacher assigned",
+        "day": s.day,
+        "day_name": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][s.day],
+        "start_time": s.start_time,
+        "end_time": s.end_time,
+        "room": s.room
+    } for s in schedules]
+
+
+@router.get("/schedule/{schedule_id}")
+def get_schedule(schedule_id: int, current_user: User = Depends(require_role(["admin"])),
+                 db: Session = Depends(get_db)):
+    """Get specific schedule details"""
+    schedule = db.query(Schedule).options(
+        joinedload(Schedule.group_subject).joinedload(GroupSubject.group),
+        joinedload(Schedule.group_subject).joinedload(GroupSubject.subject),
+        joinedload(Schedule.group_subject).joinedload(GroupSubject.teacher)
+    ).filter(Schedule.id == schedule_id).first()
+
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    return {
+        "id": schedule.id,
+        "group_subject_id": schedule.group_subject_id,
+        "group_name": schedule.group_subject.group.name,
+        "subject_name": schedule.group_subject.subject.name,
+        "teacher_name": schedule.group_subject.teacher.full_name if schedule.group_subject.teacher else "No teacher assigned",
+        "day": schedule.day,
+        "day_name": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][schedule.day],
+        "start_time": schedule.start_time,
+        "end_time": schedule.end_time,
+        "room": schedule.room
+    }
+
+
+@router.put("/schedule/{schedule_id}")
+def update_schedule(schedule_id: int, request: ScheduleRequest,
+                    current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
+    """Update schedule"""
+    schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    # Verify group_subject exists
+    group_subject = db.query(GroupSubject).filter(GroupSubject.id == request.group_subject_id).first()
+    if not group_subject:
+        raise HTTPException(status_code=404, detail="Group-subject assignment not found")
+
+    # Validate day (0-6)
+    if not 0 <= request.day <= 6:
+        raise HTTPException(status_code=400, detail="Day must be between 0 (Monday) and 6 (Sunday)")
+
+    # Parse time strings
+    try:
+        start_time = time.fromisoformat(request.start_time)
+        end_time = time.fromisoformat(request.end_time)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid time format. Use HH:MM (e.g., '09:00')")
+
+    # Validate time logic
+    if start_time >= end_time:
+        raise HTTPException(status_code=400, detail="Start time must be before end time")
+
+    # Check for schedule conflicts (excluding current schedule)
+    existing_schedules = db.query(Schedule).join(GroupSubject).filter(
+        GroupSubject.group_id == group_subject.group_id,
+        Schedule.day == request.day,
+        Schedule.id != schedule_id
+    ).all()
+
+    for existing in existing_schedules:
+        if (start_time < existing.end_time and end_time > existing.start_time):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Schedule conflict with existing class from {existing.start_time} to {existing.end_time}"
+            )
+
+    # Update schedule
+    schedule.group_subject_id = request.group_subject_id
+    schedule.day = request.day
+    schedule.start_time = start_time
+    schedule.end_time = end_time
+    schedule.room = request.room
+
+    db.commit()
+    return {"message": "Schedule updated"}
+
+
+@router.delete("/schedule/{schedule_id}")
+def delete_schedule(schedule_id: int, current_user: User = Depends(require_role(["admin"])),
+                    db: Session = Depends(get_db)):
+    """Delete schedule"""
+    schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    db.delete(schedule)
+    db.commit()
+    return {"message": "Schedule deleted"}

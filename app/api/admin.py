@@ -450,7 +450,6 @@ def create_news(request: NewsRequest, current_user: User = Depends(require_role(
     db.commit()
     return {"message": "News created", "id": news.id}
 
-
 @router.get("/news")
 def list_news(current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
     news_list = db.query(News).all()
@@ -459,7 +458,9 @@ def list_news(current_user: User = Depends(require_role(["admin"])), db: Session
         "title": n.title,
         "content": n.content[:200] + "..." if len(n.content) > 200 else n.content,
         "created_at": n.created_at,
-        "is_published": n.is_published
+        "is_published": n.is_published,
+        "external_links": n.external_links,
+        "image_ids": n.image_ids
     } for n in news_list]
 
 

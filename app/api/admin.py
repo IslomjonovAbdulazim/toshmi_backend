@@ -720,3 +720,303 @@ def update_payment(payment_id: int, request: PaymentRequest,
 
     db.commit()
     return {"message": "Payment updated"}
+
+
+# Add these endpoints to app/api/admin.py after the existing assign-teacher endpoint
+
+class ChangeTeacherRequest(BaseModel):
+    new_teacher_id: int
+
+
+class ChangeSubjectRequest(BaseModel):
+    new_subject_id: int
+
+
+class RemoveAssignmentByParamsRequest(BaseModel):
+    group_id: int
+    subject_id: int
+
+
+@router.delete("/assignments/{group_subject_id}")
+def remove_assignment(group_subject_id: int, current_user: User = Depends(require_role(["admin"])),
+                      db: Session = Depends(get_db)):
+    """Remove teacher assignment from a group-subject combination"""
+    assignment = db.query(GroupSubject).options(
+        joinedload(GroupSubject.group),
+        joinedload(GroupSubject.subject),
+        joinedload(GroupSubject.teacher)
+    ).filter(GroupSubject.id == group_subject_id).first()
+
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    # Check if there are any dependent records (homework, exams, grades, etc.)
+    from app.models.models import Homework, Exam, HomeworkGrade, ExamGrade, Attendance
+
+    homework_count = db.query(Homework).filter(Homework.group_subject_id == group_subject_id).count()
+    exam_count = db.query(Exam).filter(Exam.group_subject_id == group_subject_id).count()
+    grade_count = db.query(HomeworkGrade).join(Homework).filter(Homework.group_subject_id == group_subject_id).count()
+    exam_grade_count = db.query(ExamGrade).join(Exam).filter(Exam.group_subject_id == group_subject_id).count()
+    attendance_count = db.query(Attendance).filter(Attendance.group_subject_id == group_subject_id).count()
+
+    if homework_count > 0 or exam_count > 0 or grade_count > 0 or exam_grade_count > 0 or attendance_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot remove assignment. Active records: {homework_count} homework, {exam_count} exams, {grade_count + exam_grade_count} grades, {attendance_count} attendance records."
+        )
+
+    # Get assignment details for response
+    group_name = assignment.group.name
+    subject_name = assignment.subject.name
+    teacher_name = assignment.teacher.full_name if assignment.teacher else "Unassigned"
+
+    # Delete the assignment
+    db.delete(assignment)
+    db.commit()
+
+    return {
+        "message": "Assignment removed successfully",
+        "details": {
+            "group": group_name,
+            "subject": subject_name,
+            "teacher": teacher_name
+        }
+    }
+
+
+@router.delete("/assignments/by-params")
+def remove_assignment_by_params(request: RemoveAssignmentByParamsRequest,
+                                current_user: User = Depends(require_role(["admin"])),
+                                db: Session = Depends(get_db)):
+    """Remove assignment by group_id and subject_id"""
+    assignment = db.query(GroupSubject).options(
+        joinedload(GroupSubject.group),
+        joinedload(GroupSubject.subject),
+        joinedload(GroupSubject.teacher)
+    ).filter(
+        GroupSubject.group_id == request.group_id,
+        GroupSubject.subject_id == request.subject_id
+    ).first()
+
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    # Check for dependent records
+    from app.models.models import Homework, Exam, HomeworkGrade, ExamGrade, Attendance
+
+    homework_count = db.query(Homework).filter(Homework.group_subject_id == assignment.id).count()
+    exam_count = db.query(Exam).filter(Exam.group_subject_id == assignment.id).count()
+    grade_count = db.query(HomeworkGrade).join(Homework).filter(Homework.group_subject_id == assignment.id).count()
+    exam_grade_count = db.query(ExamGrade).join(Exam).filter(Exam.group_subject_id == assignment.id).count()
+    attendance_count = db.query(Attendance).filter(Attendance.group_subject_id == assignment.id).count()
+
+    if homework_count > 0 or exam_count > 0 or grade_count > 0 or exam_grade_count > 0 or attendance_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot remove assignment. Active records: {homework_count} homework, {exam_count} exams, {grade_count + exam_grade_count} grades, {attendance_count} attendance records."
+        )
+
+    # Get assignment details for response
+    group_name = assignment.group.name
+    subject_name = assignment.subject.name
+    teacher_name = assignment.teacher.full_name if assignment.teacher else "Unassigned"
+
+    # Delete the assignment
+    db.delete(assignment)
+    db.commit()
+
+    return {
+        "message": "Assignment removed successfully",
+        "details": {
+            "group": group_name,
+            "subject": subject_name,
+            "teacher": teacher_name
+        }
+    }
+
+
+@router.put("/assignments/{group_subject_id}/teacher")
+def change_assignment_teacher(group_subject_id: int, request: ChangeTeacherRequest,
+                              current_user: User = Depends(require_role(["admin"])),
+                              db: Session = Depends(get_db)):
+    """Change teacher for an existing assignment"""
+    assignment = db.query(GroupSubject).options(
+        joinedload(GroupSubject.group),
+        joinedload(GroupSubject.subject),
+        joinedload(GroupSubject.teacher)
+    ).filter(GroupSubject.id == group_subject_id).first()
+
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    # Verify new teacher exists and is active
+    new_teacher = db.query(User).filter(
+        User.id == request.new_teacher_id,
+        User.role == "teacher",
+        User.is_active == True
+    ).first()
+
+    if not new_teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found or inactive")
+
+    old_teacher_name = assignment.teacher.full_name if assignment.teacher else "Unassigned"
+
+    # Update teacher
+    assignment.teacher_id = request.new_teacher_id
+    db.commit()
+
+    return {
+        "message": "Teacher changed successfully",
+        "details": {
+            "group": assignment.group.name,
+            "subject": assignment.subject.name,
+            "old_teacher": old_teacher_name,
+            "new_teacher": new_teacher.full_name
+        }
+    }
+
+
+@router.put("/assignments/{group_subject_id}/subject")
+def change_assignment_subject(group_subject_id: int, request: ChangeSubjectRequest,
+                              current_user: User = Depends(require_role(["admin"])),
+                              db: Session = Depends(get_db)):
+    """Change subject for an existing assignment"""
+    assignment = db.query(GroupSubject).options(
+        joinedload(GroupSubject.group),
+        joinedload(GroupSubject.subject),
+        joinedload(GroupSubject.teacher)
+    ).filter(GroupSubject.id == group_subject_id).first()
+
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    # Verify new subject exists
+    new_subject = db.query(Subject).filter(Subject.id == request.new_subject_id).first()
+    if not new_subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    # Check if this group-subject combination already exists
+    existing = db.query(GroupSubject).filter(
+        GroupSubject.group_id == assignment.group_id,
+        GroupSubject.subject_id == request.new_subject_id,
+        GroupSubject.id != group_subject_id
+    ).first()
+
+    if existing:
+        raise HTTPException(status_code=400, detail="This group already has this subject assigned")
+
+    # Check if there are dependent records that might be affected
+    from app.models.models import Homework, Exam
+    homework_count = db.query(Homework).filter(Homework.group_subject_id == group_subject_id).count()
+    exam_count = db.query(Exam).filter(Exam.group_subject_id == group_subject_id).count()
+
+    if homework_count > 0 or exam_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot change subject. There are {homework_count} homework(s) and {exam_count} exam(s) for this assignment. Remove them first."
+        )
+
+    old_subject_name = assignment.subject.name
+
+    # Update subject
+    assignment.subject_id = request.new_subject_id
+    db.commit()
+
+    return {
+        "message": "Subject changed successfully",
+        "details": {
+            "group": assignment.group.name,
+            "teacher": assignment.teacher.full_name if assignment.teacher else "Unassigned",
+            "old_subject": old_subject_name,
+            "new_subject": new_subject.name
+        }
+    }
+
+
+@router.put("/assignments/{group_subject_id}/unassign-teacher")
+def unassign_teacher_from_assignment(group_subject_id: int,
+                                     current_user: User = Depends(require_role(["admin"])),
+                                     db: Session = Depends(get_db)):
+    """Unassign teacher from assignment (set teacher to None)"""
+    assignment = db.query(GroupSubject).options(
+        joinedload(GroupSubject.group),
+        joinedload(GroupSubject.subject),
+        joinedload(GroupSubject.teacher)
+    ).filter(GroupSubject.id == group_subject_id).first()
+
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    if not assignment.teacher_id:
+        raise HTTPException(status_code=400, detail="No teacher is currently assigned")
+
+    teacher_name = assignment.teacher.full_name
+    assignment.teacher_id = None
+    db.commit()
+
+    return {
+        "message": "Teacher unassigned successfully",
+        "details": {
+            "group": assignment.group.name,
+            "subject": assignment.subject.name,
+            "unassigned_teacher": teacher_name
+        }
+    }
+
+
+@router.get("/assignments")
+def get_all_assignments(current_user: User = Depends(require_role(["admin"])),
+                        db: Session = Depends(get_db)):
+    """Get all assignments with full details"""
+    assignments = db.query(GroupSubject).options(
+        joinedload(GroupSubject.group),
+        joinedload(GroupSubject.subject),
+        joinedload(GroupSubject.teacher)
+    ).all()
+
+    return [{
+        "id": assignment.id,
+        "group_subject_id": assignment.id,
+        "group": {
+            "id": assignment.group.id,
+            "name": assignment.group.name,
+            "academic_year": assignment.group.academic_year
+        },
+        "subject": {
+            "id": assignment.subject.id,
+            "name": assignment.subject.name,
+            "code": assignment.subject.code
+        },
+        "teacher": {
+            "id": assignment.teacher.id,
+            "name": assignment.teacher.full_name,
+            "phone": assignment.teacher.phone,
+            "is_active": assignment.teacher.is_active
+        } if assignment.teacher else None,
+        "has_teacher": assignment.teacher_id is not None
+    } for assignment in assignments]
+
+
+@router.get("/assignments/unassigned")
+def get_unassigned_subjects(current_user: User = Depends(require_role(["admin"])),
+                            db: Session = Depends(get_db)):
+    """Get all group-subject combinations without teachers"""
+    unassigned = db.query(GroupSubject).options(
+        joinedload(GroupSubject.group),
+        joinedload(GroupSubject.subject)
+    ).filter(GroupSubject.teacher_id == None).all()
+
+    return [{
+        "id": assignment.id,
+        "group_subject_id": assignment.id,
+        "group": {
+            "id": assignment.group.id,
+            "name": assignment.group.name,
+            "academic_year": assignment.group.academic_year
+        },
+        "subject": {
+            "id": assignment.subject.id,
+            "name": assignment.subject.name,
+            "code": assignment.subject.code
+        }
+    } for assignment in unassigned]

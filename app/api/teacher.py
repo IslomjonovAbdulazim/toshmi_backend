@@ -4,7 +4,8 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, date
 from app.database import get_db
-from app.models.models import User, Student, Group, Homework, Exam, HomeworkGrade, ExamGrade, Attendance, GroupSubject
+from app.models.models import User, Student, Group, Homework, Exam, HomeworkGrade, ExamGrade, Attendance, GroupSubject, \
+    Subject, Schedule
 from app.core.security import require_role
 
 router = APIRouter()
@@ -55,6 +56,32 @@ class BulkAttendanceRequest(BaseModel):
     records: List[AttendanceRecord]
 
 
+# NEW RESPONSE MODELS FOR THE NEW ENDPOINTS
+class GroupSubjectResponse(BaseModel):
+    id: int
+    group_id: int
+    subject_id: int
+    teacher_id: int
+    group_name: str
+    subject_name: str
+    subject_code: str
+
+    class Config:
+        from_attributes = True
+
+
+class ScheduleResponse(BaseModel):
+    id: int
+    day: int
+    day_name: str
+    start_time: str  # HH:MM:SS format
+    end_time: str  # HH:MM:SS format
+    room: str
+
+    class Config:
+        from_attributes = True
+
+
 def verify_teacher_assignment(group_subject_id: int, teacher_id: int, db: Session):
     assignment = db.query(GroupSubject).options(
         joinedload(GroupSubject.group),
@@ -94,6 +121,92 @@ def verify_teacher_exam(exam_id: int, teacher_id: int, db: Session):
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
     return exam
+
+
+# NEW ENDPOINT 1: Get teacher's group-subjects
+@router.get("/group-subjects", response_model=List[GroupSubjectResponse])
+def get_teacher_group_subjects(
+        current_user: User = Depends(require_role(["teacher"])),
+        db: Session = Depends(get_db)
+):
+    """
+    Get all group-subjects assigned to the current teacher.
+    Teacher can use this to see which groups they teach and what subjects.
+    """
+    try:
+        # Query group-subjects for this teacher with joined data
+        group_subjects = db.query(GroupSubject).options(
+            joinedload(GroupSubject.group),
+            joinedload(GroupSubject.subject)
+        ).filter(GroupSubject.teacher_id == current_user.id).order_by(
+            GroupSubject.group_id, GroupSubject.subject_id
+        ).all()
+
+        # Format response
+        response_data = []
+        for gs in group_subjects:
+            response_data.append(GroupSubjectResponse(
+                id=gs.id,
+                group_id=gs.group_id,
+                subject_id=gs.subject_id,
+                teacher_id=gs.teacher_id,
+                group_name=gs.group.name,
+                subject_name=gs.subject.name,
+                subject_code=gs.subject.code
+            ))
+
+        return response_data
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error retrieving group-subjects")
+
+
+# NEW ENDPOINT 2: Get schedule for a specific group-subject
+@router.get("/group-subjects/{group_subject_id}/schedule", response_model=List[ScheduleResponse])
+def get_group_subject_schedule(
+        group_subject_id: int,
+        current_user: User = Depends(require_role(["teacher"])),
+        db: Session = Depends(get_db)
+):
+    """
+    Get schedule (dates and times) for a specific group-subject.
+    Teacher uses this for attendance - first selects group-subject, then gets times.
+    """
+    try:
+        # Verify this group-subject belongs to the teacher
+        group_subject = db.query(GroupSubject).filter(
+            GroupSubject.id == group_subject_id,
+            GroupSubject.teacher_id == current_user.id
+        ).first()
+
+        if not group_subject:
+            raise HTTPException(status_code=404, detail="Group-subject not found or not assigned to you")
+
+        # Get schedule for this group-subject
+        schedules = db.query(Schedule).filter(
+            Schedule.group_subject_id == group_subject_id
+        ).order_by(Schedule.day, Schedule.start_time).all()
+
+        # Format response with day names
+        day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+        response_data = []
+        for schedule in schedules:
+            response_data.append(ScheduleResponse(
+                id=schedule.id,
+                day=schedule.day,
+                day_name=day_names[schedule.day],
+                start_time=str(schedule.start_time),
+                end_time=str(schedule.end_time),
+                room=schedule.room or ""
+            ))
+
+        return response_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error retrieving schedule")
 
 
 @router.post("/homework")

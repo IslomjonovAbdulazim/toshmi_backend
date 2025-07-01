@@ -281,13 +281,14 @@ def get_my_homework(current_user: User = Depends(require_role(["teacher"])), db:
     return [{
         "id": h.id,
         "title": h.title,
+        "description": h.description,  # ADD THIS
         "due_date": h.due_date,
         "max_points": h.max_points,
+        "external_links": h.external_links,  # ADD THIS
         "subject": h.group_subject.subject.name,
         "group": h.group_subject.group.name,
         "group_subject_id": h.group_subject_id
     } for h in homework_list]
-
 
 @router.get("/exams")
 def get_my_exams(current_user: User = Depends(require_role(["teacher"])), db: Session = Depends(get_db)):

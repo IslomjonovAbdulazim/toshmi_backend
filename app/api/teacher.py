@@ -300,8 +300,10 @@ def get_my_exams(current_user: User = Depends(require_role(["teacher"])), db: Se
     return [{
         "id": e.id,
         "title": e.title,
+        "description": e.description,  # ADD
         "exam_date": e.exam_date,
         "max_points": e.max_points,
+        "external_links": e.external_links,  # ADD
         "subject": e.group_subject.subject.name,
         "group": e.group_subject.group.name,
         "group_subject_id": e.group_subject_id

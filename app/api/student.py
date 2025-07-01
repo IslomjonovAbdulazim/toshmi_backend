@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session, joinedload, selectinload
 from datetime import datetime
 from app.database import get_db
-from app.models.models import User, Homework, Exam, Schedule, GroupSubject, ExamGrade, HomeworkGrade
+from app.models.models import User, Homework, Exam, Schedule, GroupSubject, ExamGrade, HomeworkGrade, Attendance
 from app.core.security import require_role, get_student_by_user
 
 router = APIRouter()
@@ -72,17 +72,14 @@ def get_exams(current_user: User = Depends(require_role(["student"])), db: Sessi
 def get_grades(current_user: User = Depends(require_role(["student"])), db: Session = Depends(get_db)):
     student = get_student_by_user(current_user, db)
 
-    homework_grades = db.query(User).options(
-        selectinload(User.student_profile).selectinload(
-            "homework_grades", HomeworkGrade.homework
-        ).joinedload("group_subject").joinedload(GroupSubject.subject)
-    ).filter(User.id == current_user.id).first().student_profile.homework_grades
+    # Fixed: Use proper relationship objects instead of strings
+    homework_grades = db.query(HomeworkGrade).options(
+        joinedload(HomeworkGrade.homework).joinedload(Homework.group_subject).joinedload(GroupSubject.subject)
+    ).filter(HomeworkGrade.student_id == student.id).all()
 
-    exam_grades = db.query(User).options(
-        selectinload(User.student_profile).selectinload(
-            "exam_grades", ExamGrade.exam
-        ).joinedload("group_subject").joinedload(GroupSubject.subject)
-    ).filter(User.id == current_user.id).first().student_profile.exam_grades
+    exam_grades = db.query(ExamGrade).options(
+        joinedload(ExamGrade.exam).joinedload(Exam.group_subject).joinedload(GroupSubject.subject)
+    ).filter(ExamGrade.student_id == student.id).all()
 
     return {
         "homework_grades": [{
@@ -90,7 +87,7 @@ def get_grades(current_user: User = Depends(require_role(["student"])), db: Sess
             "subject": g.homework.group_subject.subject.name,
             "points": g.points,
             "max_points": g.homework.max_points,
-            "percentage": round((g.points / g.homework.max_points) * 100, 1),
+            "percentage": round((g.points / g.homework.max_points) * 100, 1) if g.homework.max_points > 0 else 0,
             "comment": g.comment,
             "graded_at": g.graded_at
         } for g in homework_grades],
@@ -99,7 +96,7 @@ def get_grades(current_user: User = Depends(require_role(["student"])), db: Sess
             "subject": g.exam.group_subject.subject.name,
             "points": g.points,
             "max_points": g.exam.max_points,
-            "percentage": round((g.points / g.exam.max_points) * 100, 1),
+            "percentage": round((g.points / g.exam.max_points) * 100, 1) if g.exam.max_points > 0 else 0,
             "comment": g.comment,
             "graded_at": g.graded_at
         } for g in exam_grades]
@@ -110,14 +107,11 @@ def get_grades(current_user: User = Depends(require_role(["student"])), db: Sess
 def get_attendance(current_user: User = Depends(require_role(["student"])), db: Session = Depends(get_db)):
     student = get_student_by_user(current_user, db)
 
-    attendance = db.query(User).options(
-        selectinload(User.student_profile).selectinload(
-            "attendance_records"
-        ).joinedload("group_subject").joinedload(GroupSubject.subject),
-        selectinload(User.student_profile).selectinload(
-            "attendance_records"
-        ).joinedload("group_subject").joinedload(GroupSubject.teacher)
-    ).filter(User.id == current_user.id).first().student_profile.attendance_records
+    # Fixed: Use proper relationship objects instead of strings
+    attendance = db.query(Attendance).options(
+        joinedload(Attendance.group_subject).joinedload(GroupSubject.subject),
+        joinedload(Attendance.group_subject).joinedload(GroupSubject.teacher)
+    ).filter(Attendance.student_id == student.id).all()
 
     return [{
         "date": a.date,
@@ -154,20 +148,15 @@ def get_schedule(current_user: User = Depends(require_role(["student"])), db: Se
 def get_payments(current_user: User = Depends(require_role(["student"])), db: Session = Depends(get_db)):
     student = get_student_by_user(current_user, db)
 
+    # Fixed: Removed non-existent monthly_payments reference
     return {
         "payment_records": [{
             "amount": r.amount,
             "payment_date": r.payment_date,
             "payment_method": r.payment_method,
-            "description": r.description
-        } for r in student.payment_records],
-        "monthly_status": [{
-            "month": m.month,
-            "year": m.year,
-            "paid_amount": m.paid_amount,
-            "is_completed": m.is_completed,
-            "due_date": m.due_date
-        } for m in student.monthly_payments]
+            "description": r.description,
+            "created_at": r.created_at
+        } for r in student.payment_records]
     }
 
 
@@ -189,11 +178,38 @@ def get_dashboard(current_user: User = Depends(require_role(["student"])), db: S
         Exam.exam_date > datetime.utcnow()
     ).order_by(Exam.exam_date).limit(5).all()
 
-    recent_grades = sorted(
-        student.homework_grades + student.exam_grades,
-        key=lambda g: g.graded_at,
-        reverse=True
-    )[:5]
+    # Fixed: Get grades properly and handle different grade types
+    homework_grades = db.query(HomeworkGrade).options(
+        joinedload(HomeworkGrade.homework)
+    ).filter(HomeworkGrade.student_id == student.id).order_by(HomeworkGrade.graded_at.desc()).limit(3).all()
+
+    exam_grades = db.query(ExamGrade).options(
+        joinedload(ExamGrade.exam)
+    ).filter(ExamGrade.student_id == student.id).order_by(ExamGrade.graded_at.desc()).limit(3).all()
+
+    # Combine and sort recent grades
+    recent_grades = []
+
+    for g in homework_grades:
+        recent_grades.append({
+            "title": g.homework.title,
+            "type": "homework",
+            "points": g.points,
+            "max_points": g.homework.max_points,
+            "graded_at": g.graded_at
+        })
+
+    for g in exam_grades:
+        recent_grades.append({
+            "title": g.exam.title,
+            "type": "exam",
+            "points": g.points,
+            "max_points": g.exam.max_points,
+            "graded_at": g.graded_at
+        })
+
+    # Sort by graded_at and take top 5
+    recent_grades = sorted(recent_grades, key=lambda x: x["graded_at"], reverse=True)[:5]
 
     return {
         "upcoming_homework": [{
@@ -208,11 +224,5 @@ def get_dashboard(current_user: User = Depends(require_role(["student"])), db: S
             "exam_date": e.exam_date,
             "subject": e.group_subject.subject.name
         } for e in upcoming_exams],
-        "recent_grades": [{
-            "title": getattr(g.homework, 'title', None) or getattr(g.exam, 'title', None),
-            "type": "homework" if hasattr(g, 'homework') else "exam",
-            "points": g.points,
-            "max_points": getattr(g.homework, 'max_points', None) or getattr(g.exam, 'max_points', None),
-            "graded_at": g.graded_at
-        } for g in recent_grades]
+        "recent_grades": recent_grades
     }

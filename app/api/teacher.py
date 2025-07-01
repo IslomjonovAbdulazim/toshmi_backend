@@ -278,17 +278,30 @@ def get_my_homework(current_user: User = Depends(require_role(["teacher"])), db:
         joinedload(Homework.group_subject).joinedload(GroupSubject.subject)
     ).join(GroupSubject).filter(GroupSubject.teacher_id == current_user.id).all()
 
-    return [{
-        "id": h.id,
-        "title": h.title,
-        "description": h.description,  # ADD THIS
-        "due_date": h.due_date,
-        "max_points": h.max_points,
-        "external_links": h.external_links,  # ADD THIS
-        "subject": h.group_subject.subject.name,
-        "group": h.group_subject.group.name,
-        "group_subject_id": h.group_subject_id
-    } for h in homework_list]
+    result = []
+    for h in homework_list:
+        # Count graded students
+        graded_count = db.query(HomeworkGrade).filter(HomeworkGrade.homework_id == h.id).count()
+
+        # Count total students in group
+        total_students = db.query(Student).filter(Student.group_id == h.group_subject.group_id).count()
+
+        result.append({
+            "id": h.id,
+            "title": h.title,
+            "description": h.description,
+            "due_date": h.due_date,
+            "max_points": h.max_points,
+            "external_links": h.external_links,
+            "subject": h.group_subject.subject.name,
+            "group": h.group_subject.group.name,
+            "group_subject_id": h.group_subject_id,
+            "graded_count": graded_count,
+            "total_students": total_students
+        })
+
+    return result
+
 
 @router.get("/exams")
 def get_my_exams(current_user: User = Depends(require_role(["teacher"])), db: Session = Depends(get_db)):
@@ -297,18 +310,29 @@ def get_my_exams(current_user: User = Depends(require_role(["teacher"])), db: Se
         joinedload(Exam.group_subject).joinedload(GroupSubject.subject)
     ).join(GroupSubject).filter(GroupSubject.teacher_id == current_user.id).all()
 
-    return [{
-        "id": e.id,
-        "title": e.title,
-        "description": e.description,  # ADD
-        "exam_date": e.exam_date,
-        "max_points": e.max_points,
-        "external_links": e.external_links,  # ADD
-        "subject": e.group_subject.subject.name,
-        "group": e.group_subject.group.name,
-        "group_subject_id": e.group_subject_id
-    } for e in exam_list]
+    result = []
+    for e in exam_list:
+        # Count graded students
+        graded_count = db.query(ExamGrade).filter(ExamGrade.exam_id == e.id).count()
 
+        # Count total students in group
+        total_students = db.query(Student).filter(Student.group_id == e.group_subject.group_id).count()
+
+        result.append({
+            "id": e.id,
+            "title": e.title,
+            "description": e.description,
+            "exam_date": e.exam_date,
+            "max_points": e.max_points,
+            "external_links": e.external_links,
+            "subject": e.group_subject.subject.name,
+            "group": e.group_subject.group.name,
+            "group_subject_id": e.group_subject_id,
+            "graded_count": graded_count,
+            "total_students": total_students
+        })
+
+    return result
 
 @router.get("/homework/{homework_id}/grading-table")
 def get_grading_table(homework_id: int, current_user: User = Depends(require_role(["teacher"])),

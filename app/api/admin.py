@@ -318,19 +318,6 @@ def update_group(group_id: int, request: CreateGroupRequest,
     return {"message": "Group updated"}
 
 
-@router.delete("/groups/{group_id}")
-def delete_group(group_id: int, current_user: User = Depends(require_role(["admin"])),
-                 db: Session = Depends(get_db)):
-    group = db.query(Group).options(selectinload(Group.students)).filter(Group.id == group_id).first()
-    if not group:
-        raise HTTPException(status_code=404, detail="Group not found")
-    if group.students:
-        raise HTTPException(status_code=400, detail="Cannot delete group with students")
-    db.delete(group)
-    db.commit()
-    return {"message": "Group deleted"}
-
-
 @router.post("/subjects")
 def create_subject(request: CreateSubjectRequest, current_user: User = Depends(require_role(["admin"])),
                    db: Session = Depends(get_db)):
@@ -967,63 +954,6 @@ def unassign_teacher_from_assignment(group_subject_id: int,
     }
 
 
-@router.get("/assignments")
-def get_all_assignments(current_user: User = Depends(require_role(["admin"])),
-                        db: Session = Depends(get_db)):
-    """Get all assignments with full details"""
-    assignments = db.query(GroupSubject).options(
-        joinedload(GroupSubject.group),
-        joinedload(GroupSubject.subject),
-        joinedload(GroupSubject.teacher)
-    ).all()
-
-    return [{
-        "id": assignment.id,
-        "group_subject_id": assignment.id,
-        "group": {
-            "id": assignment.group.id,
-            "name": assignment.group.name,
-            "academic_year": assignment.group.academic_year
-        },
-        "subject": {
-            "id": assignment.subject.id,
-            "name": assignment.subject.name,
-            "code": assignment.subject.code
-        },
-        "teacher": {
-            "id": assignment.teacher.id,
-            "name": assignment.teacher.full_name,
-            "phone": assignment.teacher.phone,
-            "is_active": assignment.teacher.is_active
-        } if assignment.teacher else None,
-        "has_teacher": assignment.teacher_id is not None
-    } for assignment in assignments]
-
-
-@router.get("/assignments/unassigned")
-def get_unassigned_subjects(current_user: User = Depends(require_role(["admin"])),
-                            db: Session = Depends(get_db)):
-    """Get all group-subject combinations without teachers"""
-    unassigned = db.query(GroupSubject).options(
-        joinedload(GroupSubject.group),
-        joinedload(GroupSubject.subject)
-    ).filter(GroupSubject.teacher_id == None).all()
-
-    return [{
-        "id": assignment.id,
-        "group_subject_id": assignment.id,
-        "group": {
-            "id": assignment.group.id,
-            "name": assignment.group.name,
-            "academic_year": assignment.group.academic_year
-        },
-        "subject": {
-            "id": assignment.subject.id,
-            "name": assignment.subject.name,
-            "code": assignment.subject.code
-        }
-    } for assignment in unassigned]
-
 
 @router.post("/schedule")
 def create_schedule(request: ScheduleRequest, current_user: User = Depends(require_role(["admin"])),
@@ -1192,3 +1122,184 @@ def delete_schedule(schedule_id: int, current_user: User = Depends(require_role(
     db.delete(schedule)
     db.commit()
     return {"message": "Schedule deleted"}
+
+
+# Fix for get_all_assignments function (around line 980)
+@router.get("/assignments")
+def get_all_assignments(current_user: User = Depends(require_role(["admin"])),
+                        db: Session = Depends(get_db)):
+    """Get all assignments with full details"""
+    # Filter out assignments with NULL group_id or subject_id
+    assignments = db.query(GroupSubject).options(
+        joinedload(GroupSubject.group),
+        joinedload(GroupSubject.subject),
+        joinedload(GroupSubject.teacher)
+    ).filter(
+        GroupSubject.group_id.is_not(None),
+        GroupSubject.subject_id.is_not(None)
+    ).all()
+
+    result = []
+    for assignment in assignments:
+        # Additional safety check
+        if assignment.group is None or assignment.subject is None:
+            continue
+
+        assignment_data = {
+            "id": assignment.id,
+            "group_subject_id": assignment.id,
+            "group": {
+                "id": assignment.group.id,
+                "name": assignment.group.name,
+                "academic_year": assignment.group.academic_year
+            },
+            "subject": {
+                "id": assignment.subject.id,
+                "name": assignment.subject.name,
+                "code": assignment.subject.code
+            },
+            "teacher": {
+                "id": assignment.teacher.id,
+                "name": assignment.teacher.full_name,
+                "phone": assignment.teacher.phone,
+                "is_active": assignment.teacher.is_active
+            } if assignment.teacher else None,
+            "has_teacher": assignment.teacher_id is not None
+        }
+        result.append(assignment_data)
+
+    return result
+
+
+# Fix for get_unassigned_subjects function (around line 1012)
+@router.get("/assignments/unassigned")
+def get_unassigned_subjects(current_user: User = Depends(require_role(["admin"])),
+                            db: Session = Depends(get_db)):
+    """Get all group-subject combinations without teachers"""
+    # Filter out assignments with NULL group_id, subject_id, and where teacher_id is NULL
+    unassigned = db.query(GroupSubject).options(
+        joinedload(GroupSubject.group),
+        joinedload(GroupSubject.subject)
+    ).filter(
+        GroupSubject.teacher_id.is_(None),
+        GroupSubject.group_id.is_not(None),
+        GroupSubject.subject_id.is_not(None)
+    ).all()
+
+    result = []
+    for assignment in unassigned:
+        # Additional safety check
+        if assignment.group is None or assignment.subject is None:
+            continue
+
+        assignment_data = {
+            "id": assignment.group.id,
+            "name": assignment.group.name,
+            "academic_year": assignment.group.academic_year,
+            "subject": {
+                "id": assignment.subject.id,
+                "name": assignment.subject.name,
+                "code": assignment.subject.code
+            },
+            "group_subject_id": assignment.id
+        }
+        result.append(assignment_data)
+
+    return result
+
+
+# Enhanced delete_group function to handle cascading properly
+@router.delete("/groups/{group_id}")
+def delete_group(group_id: int, current_user: User = Depends(require_role(["admin"])),
+                 db: Session = Depends(get_db)):
+    """Delete group and handle all related records properly"""
+    group = db.query(Group).options(
+        selectinload(Group.students),
+        selectinload(Group.group_subjects)
+    ).filter(Group.id == group_id).first()
+
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    if group.students:
+        raise HTTPException(status_code=400, detail="Cannot delete group with students")
+
+    # Check for related records that need to be handled
+    group_subject_ids = [gs.id for gs in group.group_subjects]
+
+    if group_subject_ids:
+        from app.models.models import Homework, Exam, HomeworkGrade, ExamGrade, Attendance, Schedule
+
+        # Count dependent records
+        homework_count = db.query(Homework).filter(
+            Homework.group_subject_id.in_(group_subject_ids)
+        ).count()
+        exam_count = db.query(Exam).filter(
+            Exam.group_subject_id.in_(group_subject_ids)
+        ).count()
+        attendance_count = db.query(Attendance).filter(
+            Attendance.group_subject_id.in_(group_subject_ids)
+        ).count()
+        schedule_count = db.query(Schedule).filter(
+            Schedule.group_subject_id.in_(group_subject_ids)
+        ).count()
+
+        if homework_count > 0 or exam_count > 0 or attendance_count > 0 or schedule_count > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot delete group. It has {homework_count} homework, {exam_count} exams, {attendance_count} attendance records, and {schedule_count} schedule entries. Please remove these first."
+            )
+
+        # If no dependent records, safely delete group_subjects
+        for gs in group.group_subjects:
+            db.delete(gs)
+
+    # Finally delete the group
+    db.delete(group)
+    db.commit()
+    return {"message": "Group deleted successfully"}
+
+
+# Add a maintenance endpoint to clean up orphaned records
+@router.post("/maintenance/cleanup-orphaned-records")
+def cleanup_orphaned_records(current_user: User = Depends(require_role(["admin"])),
+                             db: Session = Depends(get_db)):
+    """Clean up orphaned records in the database"""
+    from app.models.models import Schedule, Homework, Exam, HomeworkGrade, ExamGrade, Attendance
+
+    cleanup_report = {
+        "orphaned_group_subjects": 0,
+        "orphaned_schedules": 0,
+        "orphaned_homework": 0,
+        "orphaned_exams": 0
+    }
+
+    # Clean up group_subjects with NULL group_id or subject_id
+    orphaned_gs = db.query(GroupSubject).filter(
+        or_(GroupSubject.group_id.is_(None), GroupSubject.subject_id.is_(None))
+    ).all()
+
+    for gs in orphaned_gs:
+        # Clean up related records first
+        db.query(Schedule).filter(Schedule.group_subject_id == gs.id).delete()
+        db.query(Homework).filter(Homework.group_subject_id == gs.id).delete()
+        db.query(Exam).filter(Exam.group_subject_id == gs.id).delete()
+        db.query(Attendance).filter(Attendance.group_subject_id == gs.id).delete()
+        db.delete(gs)
+        cleanup_report["orphaned_group_subjects"] += 1
+
+    # Clean up schedules referencing non-existent group_subjects
+    valid_gs_ids = [gs.id for gs in db.query(GroupSubject.id).all()]
+    orphaned_schedules = db.query(Schedule).filter(
+        ~Schedule.group_subject_id.in_(valid_gs_ids)
+    ).all()
+
+    for schedule in orphaned_schedules:
+        db.delete(schedule)
+        cleanup_report["orphaned_schedules"] += 1
+
+    db.commit()
+    return {
+        "message": "Cleanup completed successfully",
+        "report": cleanup_report
+    }

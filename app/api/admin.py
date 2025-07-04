@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 from pydantic import BaseModel
 from typing import List, Optional
@@ -373,20 +374,6 @@ def update_subject(subject_id: int, request: CreateSubjectRequest,
     db.commit()
     return {"message": "Subject updated"}
 
-
-@router.delete("/subjects/{subject_id}")
-def delete_subject(subject_id: int, current_user: User = Depends(require_role(["admin"])),
-                   db: Session = Depends(get_db)):
-    subject = db.query(Subject).options(selectinload(Subject.group_subjects)).filter(Subject.id == subject_id).first()
-    if not subject:
-        raise HTTPException(status_code=404, detail="Subject not found")
-    if subject.group_subjects:
-        raise HTTPException(status_code=400, detail="Cannot delete subject with active assignments")
-    db.delete(subject)
-    db.commit()
-    return {"message": "Subject deleted"}
-
-
 @router.post("/assign-teacher")
 def assign_teacher(request: AssignTeacherRequest, current_user: User = Depends(require_role(["admin"])),
                    db: Session = Depends(get_db)):
@@ -583,38 +570,6 @@ def hard_delete_user_and_dependencies(user_id: int, db: Session):
     # Finally delete the user
     db.delete(user)
     return True
-
-
-# REPLACE the existing delete_student function with this:
-@router.delete("/students/{student_id}")
-def delete_student(student_id: int, current_user: User = Depends(require_role(["admin"])),
-                   db: Session = Depends(get_db)):
-    student = db.query(Student).options(joinedload(Student.user)).filter(Student.id == student_id).first()
-    if not student:
-        raise HTTPException(status_code=404, detail="Student not found")
-
-    # Hard delete the student and user
-    if hard_delete_user_and_dependencies(student.user_id, db):
-        db.commit()
-        return {"message": "Student deleted completely"}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to delete student")
-
-
-# REPLACE the existing delete_teacher function with this:
-@router.delete("/teachers/{teacher_id}")
-def delete_teacher(teacher_id: int, current_user: User = Depends(require_role(["admin"])),
-                   db: Session = Depends(get_db)):
-    teacher = db.query(User).filter(User.id == teacher_id, User.role == "teacher").first()
-    if not teacher:
-        raise HTTPException(status_code=404, detail="Teacher not found")
-
-    # Hard delete the teacher and unassign from subjects
-    if hard_delete_user_and_dependencies(teacher_id, db):
-        db.commit()
-        return {"message": "Teacher deleted completely"}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to delete teacher")
 
 
 # REPLACE the existing delete_parent function with this:
@@ -1208,58 +1163,6 @@ def get_unassigned_subjects(current_user: User = Depends(require_role(["admin"])
     return result
 
 
-# Enhanced delete_group function to handle cascading properly
-@router.delete("/groups/{group_id}")
-def delete_group(group_id: int, current_user: User = Depends(require_role(["admin"])),
-                 db: Session = Depends(get_db)):
-    """Delete group and handle all related records properly"""
-    group = db.query(Group).options(
-        selectinload(Group.students),
-        selectinload(Group.group_subjects)
-    ).filter(Group.id == group_id).first()
-
-    if not group:
-        raise HTTPException(status_code=404, detail="Group not found")
-
-    if group.students:
-        raise HTTPException(status_code=400, detail="Cannot delete group with students")
-
-    # Check for related records that need to be handled
-    group_subject_ids = [gs.id for gs in group.group_subjects]
-
-    if group_subject_ids:
-        from app.models.models import Homework, Exam, HomeworkGrade, ExamGrade, Attendance, Schedule
-
-        # Count dependent records
-        homework_count = db.query(Homework).filter(
-            Homework.group_subject_id.in_(group_subject_ids)
-        ).count()
-        exam_count = db.query(Exam).filter(
-            Exam.group_subject_id.in_(group_subject_ids)
-        ).count()
-        attendance_count = db.query(Attendance).filter(
-            Attendance.group_subject_id.in_(group_subject_ids)
-        ).count()
-        schedule_count = db.query(Schedule).filter(
-            Schedule.group_subject_id.in_(group_subject_ids)
-        ).count()
-
-        if homework_count > 0 or exam_count > 0 or attendance_count > 0 or schedule_count > 0:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Cannot delete group. It has {homework_count} homework, {exam_count} exams, {attendance_count} attendance records, and {schedule_count} schedule entries. Please remove these first."
-            )
-
-        # If no dependent records, safely delete group_subjects
-        for gs in group.group_subjects:
-            db.delete(gs)
-
-    # Finally delete the group
-    db.delete(group)
-    db.commit()
-    return {"message": "Group deleted successfully"}
-
-
 # Add a maintenance endpoint to clean up orphaned records
 @router.post("/maintenance/cleanup-orphaned-records")
 def cleanup_orphaned_records(current_user: User = Depends(require_role(["admin"])),
@@ -1303,3 +1206,158 @@ def cleanup_orphaned_records(current_user: User = Depends(require_role(["admin"]
         "message": "Cleanup completed successfully",
         "report": cleanup_report
     }
+
+
+# Replace these functions in your admin.py file
+
+@router.delete("/teachers/{teacher_id}")
+def delete_teacher(teacher_id: int, current_user: User = Depends(require_role(["admin"])),
+                   db: Session = Depends(get_db)):
+    """Delete teacher only if they have no active assignments"""
+    teacher = db.query(User).filter(User.id == teacher_id, User.role == "teacher").first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
+    # Check for active group-subject assignments
+    active_assignments = db.query(GroupSubject).filter(GroupSubject.teacher_id == teacher_id).all()
+
+    if active_assignments:
+        # Get details of assignments for error message
+        assignment_details = []
+        for assignment in active_assignments:
+            if assignment.group and assignment.subject:  # Safety check
+                assignment_details.append(f"{assignment.group.name} - {assignment.subject.name}")
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete teacher. They are assigned to {len(active_assignments)} subjects: {', '.join(assignment_details[:3])}{'...' if len(assignment_details) > 3 else ''}"
+        )
+
+    # Safe to delete - no active assignments
+    # Delete teacher's notifications first
+    from app.models.models import Notification
+    db.query(Notification).filter(Notification.user_id == teacher_id).delete()
+
+    # Delete teacher's uploaded files
+    from app.models.models import File
+    db.query(File).filter(File.uploaded_by == teacher_id).delete()
+
+    # Delete the teacher
+    db.delete(teacher)
+    db.commit()
+
+    return {"message": f"Teacher {teacher.full_name} deleted successfully"}
+
+
+@router.delete("/groups/{group_id}")
+def delete_group(group_id: int, current_user: User = Depends(require_role(["admin"])),
+                 db: Session = Depends(get_db)):
+    """Delete group only if it has no students and no active assignments"""
+    group = db.query(Group).options(
+        selectinload(Group.students),
+        selectinload(Group.group_subjects)
+    ).filter(Group.id == group_id).first()
+
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    # Check for students
+    if group.students:
+        student_names = [s.user.full_name for s in group.students[:3]]
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete group. It has {len(group.students)} students: {', '.join(student_names)}{'...' if len(group.students) > 3 else ''}"
+        )
+
+    # Check for active assignments (group-subjects)
+    if group.group_subjects:
+        subject_names = []
+        for gs in group.group_subjects:
+            if gs.subject:  # Safety check
+                teacher_info = f" (Teacher: {gs.teacher.full_name})" if gs.teacher else " (No teacher)"
+                subject_names.append(f"{gs.subject.name}{teacher_info}")
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete group. It has {len(group.group_subjects)} subject assignments: {', '.join(subject_names[:3])}{'...' if len(subject_names) > 3 else ''}"
+        )
+
+    # Safe to delete
+    db.delete(group)
+    db.commit()
+    return {"message": f"Group {group.name} deleted successfully"}
+
+
+@router.delete("/subjects/{subject_id}")
+def delete_subject(subject_id: int, current_user: User = Depends(require_role(["admin"])),
+                   db: Session = Depends(get_db)):
+    """Delete subject only if it has no active assignments"""
+    subject = db.query(Subject).options(
+        selectinload(Subject.group_subjects)
+    ).filter(Subject.id == subject_id).first()
+
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    # Check for active assignments
+    if subject.group_subjects:
+        group_names = []
+        for gs in subject.group_subjects:
+            if gs.group:  # Safety check
+                teacher_info = f" (Teacher: {gs.teacher.full_name})" if gs.teacher else " (No teacher)"
+                group_names.append(f"{gs.group.name}{teacher_info}")
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete subject. It's assigned to {len(subject.group_subjects)} groups: {', '.join(group_names[:3])}{'...' if len(group_names) > 3 else ''}"
+        )
+
+    # Safe to delete
+    db.delete(subject)
+    db.commit()
+    return {"message": f"Subject {subject.name} deleted successfully"}
+
+
+@router.delete("/students/{student_id}")
+def delete_student(student_id: int, current_user: User = Depends(require_role(["admin"])),
+                   db: Session = Depends(get_db)):
+    """Delete student and check for related data"""
+    student = db.query(Student).options(joinedload(Student.user)).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    # Check for related academic data
+    from app.models.models import HomeworkGrade, ExamGrade, Attendance
+
+    homework_grades = db.query(HomeworkGrade).filter(HomeworkGrade.student_id == student_id).count()
+    exam_grades = db.query(ExamGrade).filter(ExamGrade.student_id == student_id).count()
+    attendance_records = db.query(Attendance).filter(Attendance.student_id == student_id).count()
+
+    if homework_grades > 0 or exam_grades > 0 or attendance_records > 0:
+        # Ask for confirmation or provide option to archive instead
+        raise HTTPException(
+            status_code=400,
+            detail=f"Student has academic records: {homework_grades} homework grades, {exam_grades} exam grades, {attendance_records} attendance records. Consider archiving instead of deleting, or use force_delete=true parameter."
+        )
+
+    # Safe to delete - no academic records
+    user_id = student.user_id
+
+    # Delete student record
+    db.delete(student)
+
+    # Delete user record
+    user = db.query(User).filter(User.id == user_id).first()
+    if user:
+        # Delete user's notifications
+        from app.models.models import Notification
+        db.query(Notification).filter(Notification.user_id == user_id).delete()
+
+        # Delete user's files
+        from app.models.models import File
+        db.query(File).filter(File.uploaded_by == user_id).delete()
+
+        db.delete(user)
+
+    db.commit()
+    return {"message": f"Student {student.user.full_name} deleted successfully"}

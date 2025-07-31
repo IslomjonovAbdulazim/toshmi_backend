@@ -37,6 +37,7 @@ uploads/
 *.swp
 *.swo
 
+test.py
 # OS
 .DS_Store
 Thumbs.db

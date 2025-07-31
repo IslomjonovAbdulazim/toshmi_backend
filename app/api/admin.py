@@ -12,6 +12,29 @@ from datetime import time
 router = APIRouter()
 
 
+def validate_phone_number(phone: str) -> bool:
+    """
+    Validate Uzbekistan phone number format: +998XXXXXXXXX
+    Must be exactly 13 characters starting with +998
+    """
+    if not phone:
+        return False
+    
+    # Check length (must be exactly 13 characters)
+    if len(phone) != 13:
+        return False
+    
+    # Check format: +998 followed by 9 digits
+    if not phone.startswith("+998"):
+        return False
+    
+    # Check that the remaining 9 characters are digits
+    if not phone[4:].isdigit():
+        return False
+    
+    return True
+
+
 class CreateUserRequest(BaseModel):
     phone: str
     password: str
@@ -80,6 +103,13 @@ class ScheduleRequest(BaseModel):
 
 
 def create_user(data: CreateUserRequest, role: str, db: Session):
+    # Validate phone number format
+    if not validate_phone_number(data.phone):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid phone number format. Must be in format +998XXXXXXXXX (13 digits total). Example: +998990330919"
+        )
+    
     if db.query(User).filter(User.phone == data.phone).first():
         raise HTTPException(status_code=400, detail="Phone number already exists")
 
@@ -97,6 +127,13 @@ def create_user(data: CreateUserRequest, role: str, db: Session):
 
 def update_user(user: User, data: UpdateUserRequest, db: Session):
     if data.phone and data.phone != user.phone:
+        # Validate phone number format
+        if not validate_phone_number(data.phone):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid phone number format. Must be in format +998XXXXXXXXX (13 digits total). Example: +998990330919"
+            )
+        
         if db.query(User).filter(User.phone == data.phone, User.id != user.id).first():
             raise HTTPException(status_code=400, detail="Phone number already exists")
         user.phone = data.phone
@@ -114,6 +151,13 @@ def update_user(user: User, data: UpdateUserRequest, db: Session):
 @router.post("/students")
 def create_student(request: CreateStudentRequest, current_user: User = Depends(require_role(["admin"])),
                    db: Session = Depends(get_db)):
+    # Validate parent phone number format
+    if not validate_phone_number(request.parent_phone):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid parent phone number format. Must be in format +998XXXXXXXXX (13 digits total). Example: +998990330919"
+        )
+    
     user = create_user(request, "student", db)
     student = Student(
         user_id=user.id,
@@ -140,7 +184,7 @@ def list_students(skip: int = 0, limit: int = 100, current_user: User = Depends(
         "name": s.user.full_name,
         "phone": s.user.phone,
         "group_id": s.group_id,  # Added this field for frontend filtering
-        "group_name": s.group.name,
+        "group_name": s.group.name if s.group else "No Group",
         "parent_phone": s.parent_phone,
         "graduation_year": s.graduation_year,
         "is_active": s.user.is_active
@@ -164,7 +208,7 @@ def get_student(student_id: int, current_user: User = Depends(require_role(["adm
         "name": student.user.full_name,
         "phone": student.user.phone,
         "group_id": student.group_id,
-        "group_name": student.group.name,
+        "group_name": student.group.name if student.group else "No Group",
         "parent_phone": student.parent_phone,
         "graduation_year": student.graduation_year,
         "is_active": student.user.is_active
@@ -183,6 +227,12 @@ def update_student(student_id: int, request: UpdateStudentRequest,
     if request.group_id:
         student.group_id = request.group_id
     if request.parent_phone:
+        # Validate parent phone number format
+        if not validate_phone_number(request.parent_phone):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid parent phone number format. Must be in format +998XXXXXXXXX (13 digits total). Example: +998990330919"
+            )
         student.parent_phone = request.parent_phone
     if request.graduation_year:
         student.graduation_year = request.graduation_year
@@ -617,7 +667,7 @@ def list_all_payments(skip: int = 0, limit: int = 100, student_id: Optional[int]
         "student_id": p.student_id,
         "student_name": p.student.user.full_name,
         "student_phone": p.student.user.phone,
-        "group_name": p.student.group.name,
+        "group_name": p.student.group.name if p.student.group else "No Group",
         "amount": p.amount,
         "payment_date": p.payment_date,
         "payment_method": p.payment_method,
@@ -643,7 +693,7 @@ def get_payment(payment_id: int, current_user: User = Depends(require_role(["adm
         "student_id": payment.student_id,
         "student_name": payment.student.user.full_name,
         "student_phone": payment.student.user.phone,
-        "group_name": payment.student.group.name,
+        "group_name": payment.student.group.name if payment.student.group else "No Group",
         "amount": payment.amount,
         "payment_date": payment.payment_date,
         "payment_method": payment.payment_method,

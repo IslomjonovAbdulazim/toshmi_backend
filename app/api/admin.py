@@ -536,21 +536,20 @@ def delete_payment(payment_id: int, current_user: User = Depends(require_role(["
 
 
 def hard_delete_user_and_dependencies(user_id: int, db: Session):
-    """Hard delete user and all related data"""
+    """Hard delete user and all related data - PROTECTED: Students cannot be deleted"""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         return False
 
-    # Delete student profile and related data if exists
+    # PROTECTION: Prevent student deletion
+    if user.role == "student":
+        return False
+
+    # Delete student profile and related data if exists (this should not happen due to above check)
     student = db.query(Student).filter(Student.user_id == user_id).first()
     if student:
-        # Delete student's homework grades, exam grades, attendance, payments
-        from app.models.models import HomeworkGrade, ExamGrade, Attendance
-        db.query(HomeworkGrade).filter(HomeworkGrade.student_id == student.id).delete()
-        db.query(ExamGrade).filter(ExamGrade.student_id == student.id).delete()
-        db.query(Attendance).filter(Attendance.student_id == student.id).delete()
-        db.query(PaymentRecord).filter(PaymentRecord.student_id == student.id).delete()
-        db.delete(student)
+        # This should not execute due to the protection above, but keeping for safety
+        return False
 
     # Delete teacher's assignments if exists
     if user.role == "teacher":
@@ -1321,43 +1320,21 @@ def delete_subject(subject_id: int, current_user: User = Depends(require_role(["
 @router.delete("/students/{student_id}")
 def delete_student(student_id: int, current_user: User = Depends(require_role(["admin"])),
                    db: Session = Depends(get_db)):
-    """Delete student and check for related data"""
+    """Student deletion is not allowed to prevent data loss"""
     student = db.query(Student).options(joinedload(Student.user)).filter(Student.id == student_id).first()
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    # Check for related academic data
+    # Check for related academic data to provide detailed feedback
     from app.models.models import HomeworkGrade, ExamGrade, Attendance
 
     homework_grades = db.query(HomeworkGrade).filter(HomeworkGrade.student_id == student_id).count()
     exam_grades = db.query(ExamGrade).filter(ExamGrade.student_id == student_id).count()
     attendance_records = db.query(Attendance).filter(Attendance.student_id == student_id).count()
+    payment_records = db.query(PaymentRecord).filter(PaymentRecord.student_id == student_id).count()
 
-    if homework_grades > 0 or exam_grades > 0 or attendance_records > 0:
-        # Ask for confirmation or provide option to archive instead
-        raise HTTPException(
-            status_code=400,
-            detail=f"Student has academic records: {homework_grades} homework grades, {exam_grades} exam grades, {attendance_records} attendance records. Consider archiving instead of deleting, or use force_delete=true parameter."
-        )
-
-    # Safe to delete - no academic records
-    user_id = student.user_id
-
-    # Delete student record
-    db.delete(student)
-
-    # Delete user record
-    user = db.query(User).filter(User.id == user_id).first()
-    if user:
-        # Delete user's notifications
-        from app.models.models import Notification
-        db.query(Notification).filter(Notification.user_id == user_id).delete()
-
-        # Delete user's files
-        from app.models.models import File
-        db.query(File).filter(File.uploaded_by == user_id).delete()
-
-        db.delete(user)
-
-    db.commit()
-    return {"message": f"Student {student.user.full_name} deleted successfully"}
+    # Always prevent deletion and provide helpful feedback
+    raise HTTPException(
+        status_code=403,
+        detail=f"Student deletion is not allowed to prevent data loss. Student '{student.user.full_name}' has {homework_grades} homework grades, {exam_grades} exam grades, {attendance_records} attendance records, and {payment_records} payment records. Instead, you can deactivate the student account by updating their status to inactive."
+    )

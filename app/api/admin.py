@@ -1461,3 +1461,4 @@ def delete_student(student_id: int, current_user: User = Depends(require_role(["
             "payment_records": 0
         }
     }
+

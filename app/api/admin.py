@@ -52,7 +52,7 @@ class UpdateUserRequest(BaseModel):
 
 class CreateStudentRequest(CreateUserRequest):
     group_id: int
-    parent_phone: str
+    parent_phone: Optional[str] = None
     graduation_year: int
 
 
@@ -151,8 +151,8 @@ def update_user(user: User, data: UpdateUserRequest, db: Session):
 @router.post("/students")
 def create_student(request: CreateStudentRequest, current_user: User = Depends(require_role(["admin"])),
                    db: Session = Depends(get_db)):
-    # Validate parent phone number format
-    if not validate_phone_number(request.parent_phone):
+    # Validate parent phone number format only if provided
+    if request.parent_phone and not validate_phone_number(request.parent_phone):
         raise HTTPException(
             status_code=400, 
             detail=f"Invalid parent phone number format. Must be in format +998XXXXXXXXX (13 digits total). Example: +998990330919"
@@ -226,9 +226,9 @@ def update_student(student_id: int, request: UpdateStudentRequest,
         update_user(student.user, request.user_data, db)
     if request.group_id:
         student.group_id = request.group_id
-    if request.parent_phone:
-        # Validate parent phone number format
-        if not validate_phone_number(request.parent_phone):
+    if request.parent_phone is not None:
+        # Validate parent phone number format only if provided (not empty)
+        if request.parent_phone and not validate_phone_number(request.parent_phone):
             raise HTTPException(
                 status_code=400, 
                 detail=f"Invalid parent phone number format. Must be in format +998XXXXXXXXX (13 digits total). Example: +998990330919"

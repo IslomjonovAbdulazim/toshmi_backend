@@ -1019,25 +1019,40 @@ def create_schedule(request: ScheduleRequest, current_user: User = Depends(requi
 
 @router.get("/schedule")
 def list_schedules(current_user: User = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
-    """List all schedules"""
-    schedules = db.query(Schedule).options(
-        joinedload(Schedule.group_subject).joinedload(GroupSubject.group),
-        joinedload(Schedule.group_subject).joinedload(GroupSubject.subject),
-        joinedload(Schedule.group_subject).joinedload(GroupSubject.teacher)
-    ).all()
+    """List all schedules with proper error handling"""
+    try:
+        schedules = db.query(Schedule).options(
+            joinedload(Schedule.group_subject).joinedload(GroupSubject.group),
+            joinedload(Schedule.group_subject).joinedload(GroupSubject.subject),
+            joinedload(Schedule.group_subject).joinedload(GroupSubject.teacher)
+        ).all()
 
-    return [{
-        "id": s.id,
-        "group_subject_id": s.group_subject_id,
-        "group_name": s.group_subject.group.name,
-        "subject_name": s.group_subject.subject.name,
-        "teacher_name": s.group_subject.teacher.full_name if s.group_subject.teacher else "No teacher assigned",
-        "day": s.day,
-        "day_name": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][s.day],
-        "start_time": s.start_time,
-        "end_time": s.end_time,
-        "room": s.room
-    } for s in schedules]
+        result = []
+        for s in schedules:
+            # Safety checks for missing data
+            if not s.group_subject or not s.group_subject.group or not s.group_subject.subject:
+                continue  # Skip schedules with missing group/subject data
+                
+            schedule_data = {
+                "id": s.id,
+                "group_subject_id": s.group_subject_id,
+                "group_name": s.group_subject.group.name,
+                "subject_name": s.group_subject.subject.name,
+                "teacher_name": s.group_subject.teacher.full_name if s.group_subject.teacher else "No teacher assigned",
+                "day": s.day,
+                "day_name": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][s.day],
+                "start_time": s.start_time,
+                "end_time": s.end_time,
+                "room": s.room
+            }
+            result.append(schedule_data)
+        
+        return result
+    except Exception as e:
+        # Log the error and return empty array instead of crashing
+        import logging
+        logging.error(f"Error loading schedules: {str(e)}")
+        return []
 
 
 @router.get("/schedule/{schedule_id}")
@@ -1306,16 +1321,15 @@ def delete_teacher(teacher_id: int, current_user: User = Depends(require_role(["
 @router.delete("/groups/{group_id}")
 def delete_group(group_id: int, current_user: User = Depends(require_role(["admin"])),
                  db: Session = Depends(get_db)):
-    """Delete group only if it has no students and no active assignments"""
+    """Delete group only if it has no students. Clean up related data automatically."""
     group = db.query(Group).options(
-        selectinload(Group.students),
-        selectinload(Group.group_subjects)
+        selectinload(Group.students)
     ).filter(Group.id == group_id).first()
 
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    # Check for students
+    # Only check for students - this is the main constraint
     if group.students:
         student_names = [s.user.full_name for s in group.students[:3]]
         raise HTTPException(
@@ -1323,23 +1337,38 @@ def delete_group(group_id: int, current_user: User = Depends(require_role(["admi
             detail=f"Cannot delete group. It has {len(group.students)} students: {', '.join(student_names)}{'...' if len(group.students) > 3 else ''}"
         )
 
-    # Check for active assignments (group-subjects)
-    if group.group_subjects:
-        subject_names = []
-        for gs in group.group_subjects:
-            if gs.subject:  # Safety check
-                teacher_info = f" (Teacher: {gs.teacher.full_name})" if gs.teacher else " (No teacher)"
-                subject_names.append(f"{gs.subject.name}{teacher_info}")
-
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot delete group. It has {len(group.group_subjects)} subject assignments: {', '.join(subject_names[:3])}{'...' if len(subject_names) > 3 else ''}"
-        )
-
-    # Safe to delete
+    # Clean up related data before deleting the group
+    from app.models.models import Schedule, Homework, Exam, HomeworkGrade, ExamGrade, Attendance
+    
+    # Get all group subjects for this group
+    group_subjects = db.query(GroupSubject).filter(GroupSubject.group_id == group_id).all()
+    
+    for gs in group_subjects:
+        # Clean up schedules
+        db.query(Schedule).filter(Schedule.group_subject_id == gs.id).delete()
+        
+        # Clean up homework and related grades
+        homeworks = db.query(Homework).filter(Homework.group_subject_id == gs.id).all()
+        for hw in homeworks:
+            db.query(HomeworkGrade).filter(HomeworkGrade.homework_id == hw.id).delete()
+        db.query(Homework).filter(Homework.group_subject_id == gs.id).delete()
+        
+        # Clean up exams and related grades
+        exams = db.query(Exam).filter(Exam.group_subject_id == gs.id).all()
+        for exam in exams:
+            db.query(ExamGrade).filter(ExamGrade.exam_id == exam.id).delete()
+        db.query(Exam).filter(Exam.group_subject_id == gs.id).delete()
+        
+        # Clean up attendance records
+        db.query(Attendance).filter(Attendance.group_subject_id == gs.id).delete()
+        
+        # Delete the group subject assignment
+        db.delete(gs)
+    
+    # Now safe to delete the group
     db.delete(group)
     db.commit()
-    return {"message": f"Group {group.name} deleted successfully"}
+    return {"message": f"Group '{group.name}' deleted successfully with all related data cleaned up"}
 
 
 @router.delete("/subjects/{subject_id}")

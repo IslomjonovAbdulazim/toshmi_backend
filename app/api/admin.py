@@ -171,7 +171,7 @@ def create_student(request: CreateStudentRequest, current_user: User = Depends(r
 
 
 @router.get("/students")
-def list_students(skip: int = 0, limit: int = 100, current_user: User = Depends(require_role(["admin"])),
+def list_students(skip: int = 0, limit: int = 500, current_user: User = Depends(require_role(["admin"])),
                   db: Session = Depends(get_db)):
     students = db.query(Student).options(
         joinedload(Student.user),
@@ -645,7 +645,7 @@ def delete_parent(parent_id: int, current_user: User = Depends(require_role(["ad
 # ADD THESE NEW PAYMENT ENDPOINTS at the end of the file:
 
 @router.get("/payments")
-def list_all_payments(skip: int = 0, limit: int = 100, student_id: Optional[int] = None,
+def list_all_payments(skip: int = 0, limit: int = 500, student_id: Optional[int] = None,
                       payment_method: Optional[str] = None,
                       current_user: User = Depends(require_role(["admin"])),
                       db: Session = Depends(get_db)):

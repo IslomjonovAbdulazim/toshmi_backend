@@ -1,16 +1,19 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import text, inspect
 import os
 import logging
+import asyncio
 
 from app.core.config import settings
 from app.database import get_db, engine
 from app.api import auth, admin, teacher, student, parent, files
 from app.models.models import Base, User, Student, Group, Subject
-from app.core.security import hash_password
+from app.core.security import hash_password, get_current_user
+from app.services.websocket_manager import student_manager, teacher_manager, parent_manager, periodic_broadcast_students, periodic_broadcast_teachers, periodic_broadcast_parents
+from app.middleware.activity_tracker import EnhancedActivityTrackingMiddleware
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +32,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(EnhancedActivityTrackingMiddleware)
 
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
@@ -428,3 +433,102 @@ def get_published_news():
         } for n in news_list]
     finally:
         db.close()
+
+
+@app.websocket("/ws/students")
+async def students_websocket(websocket: WebSocket):
+    await websocket.accept()
+    
+    try:
+        connected = await student_manager.connect(websocket, 0)  # Use 0 as dummy ID for broadcast
+        if not connected:
+            return
+        
+        try:
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            student_manager.disconnect(0)
+    
+    except Exception as e:
+        logger.error(f"Students WebSocket error: {e}")
+        student_manager.disconnect(0)
+
+
+@app.websocket("/ws/teachers")
+async def teachers_websocket(websocket: WebSocket):
+    await websocket.accept()
+    
+    try:
+        connected = await teacher_manager.connect(websocket, 0)
+        if not connected:
+            return
+        
+        try:
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            teacher_manager.disconnect(0)
+    
+    except Exception as e:
+        logger.error(f"Teachers WebSocket error: {e}")
+        teacher_manager.disconnect(0)
+
+
+@app.websocket("/ws/parents")
+async def parents_websocket(websocket: WebSocket):
+    await websocket.accept()
+    
+    try:
+        connected = await parent_manager.connect(websocket, 0)
+        if not connected:
+            return
+        
+        try:
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            parent_manager.disconnect(0)
+    
+    except Exception as e:
+        logger.error(f"Parents WebSocket error: {e}")
+        parent_manager.disconnect(0)
+
+
+@app.get("/activity/status", tags=["Activity Tracking"])
+async def get_activity_status(current_user: User = Depends(get_current_user)):
+    """Get current activity tracking status"""
+    db = next(get_db())
+    try:
+        recent_activity = db.query(User).filter(
+            User.is_active == True,
+            User.last_active.isnot(None)
+        ).order_by(User.last_active.desc()).limit(50).all()
+        
+        activity_list = []
+        for user in recent_activity:
+            activity_list.append({
+                "user_id": user.id,
+                "phone": user.phone,
+                "full_name": user.full_name,
+                "role": user.role,
+                "last_active": user.last_active.isoformat() if user.last_active else None
+            })
+        
+        return {
+            "student_connections": len(student_manager.active_connections),
+            "teacher_connections": len(teacher_manager.active_connections),
+            "parent_connections": len(parent_manager.active_connections),
+            "recent_activity": activity_list,
+            "max_connections": 3000
+        }
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Start the periodic activity broadcast tasks for all roles"""
+    asyncio.create_task(periodic_broadcast_students())
+    asyncio.create_task(periodic_broadcast_teachers())
+    asyncio.create_task(periodic_broadcast_parents())

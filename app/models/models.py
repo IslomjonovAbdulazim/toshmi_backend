@@ -15,6 +15,7 @@ class User(Base):
     last_name = Column(String)
     is_active = Column(Boolean, default=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    last_active = Column(DateTime, default=datetime.utcnow, index=True)
     profile_image_id = Column(Integer, ForeignKey("files.id"))
 
     profile_image = relationship("File", foreign_keys=[profile_image_id])

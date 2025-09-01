@@ -30,11 +30,33 @@ class EnhancedActivityTrackingMiddleware(BaseHTTPMiddleware):
         
         response = await call_next(request)
         
-        # Update last_active time in memory after successful request
+        # Update activity in database after successful request
         if user_id:
             try:
-                from app.services.websocket_manager import update_user_activity
-                update_user_activity(user_id)
+                from app.database import get_db
+                from app.models.models import UserActivity, User
+                
+                db = next(get_db())
+                
+                # Get user info
+                user = db.query(User).filter(User.id == user_id).first()
+                if user:
+                    # Update or create activity record
+                    activity = db.query(UserActivity).filter(UserActivity.user_id == user_id).first()
+                    if activity:
+                        activity.last_active = datetime.utcnow()
+                        activity.phone = user.phone
+                    else:
+                        activity = UserActivity(
+                            user_id=user_id,
+                            phone=user.phone,
+                            last_active=datetime.utcnow()
+                        )
+                        db.add(activity)
+                    
+                    db.commit()
+                db.close()
+                
             except Exception as e:
                 logger.error(f"Failed to update user activity for user {user_id}: {e}")
         

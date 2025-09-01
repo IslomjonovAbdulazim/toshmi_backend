@@ -256,3 +256,21 @@ class Schedule(Base):
     __table_args__ = (
         Index('idx_schedule_day_time', 'day', 'start_time'),
     )
+
+
+class UserActivity(Base):
+    __tablename__ = "user_activity"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, index=True)
+    phone = Column(String, index=True)
+    last_active = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index('idx_activity_last_active', 'last_active'),
+        Index('idx_activity_phone', 'phone'),
+    )

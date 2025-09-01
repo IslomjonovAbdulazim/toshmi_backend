@@ -5,21 +5,10 @@ import asyncio
 from datetime import datetime
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models.models import User
+from app.models.models import User, UserActivity
 import logging
 
 logger = logging.getLogger(__name__)
-
-# In-memory activity store
-user_activity_store: Dict[int, datetime] = {}
-
-def update_user_activity(user_id: int):
-    """Update user's last active time in memory"""
-    user_activity_store[user_id] = datetime.utcnow()
-
-def get_user_activity(user_id: int) -> datetime:
-    """Get user's last active time from memory"""
-    return user_activity_store.get(user_id)
 
 class WebSocketManager:
     def __init__(self):
@@ -54,17 +43,21 @@ class WebSocketManager:
         
         try:
             db = next(get_db())
-            users = db.query(User).filter(
+            
+            # Query users with their activity data
+            query = db.query(User, UserActivity).outerjoin(
+                UserActivity, User.id == UserActivity.user_id
+            ).filter(
                 User.is_active == True,
                 User.role == role
-            ).all()
+            )
             
             current_time = datetime.utcnow()
             activity_data = []
             
-            for user in users:
-                # Get last_active from in-memory store
-                last_active = get_user_activity(user.id)
+            for user, activity in query:
+                # Get last_active from database
+                last_active = activity.last_active if activity else None
                 
                 # Calculate if user is online (active within 30 seconds)
                 is_online = False

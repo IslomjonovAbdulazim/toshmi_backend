@@ -10,7 +10,7 @@ import asyncio
 from app.core.config import settings
 from app.database import get_db, engine
 from app.api import auth, admin, teacher, student, parent, files
-from app.models.models import Base, User, Student, Group, Subject
+from app.models.models import User, Student, Group, Subject
 from app.core.security import hash_password, get_current_user
 from app.services.websocket_manager import student_manager, teacher_manager, parent_manager, periodic_broadcast_students, periodic_broadcast_teachers, periodic_broadcast_parents
 from app.middleware.activity_tracker import EnhancedActivityTrackingMiddleware
@@ -58,66 +58,6 @@ def verify_database_connection():
         return False
 
 
-def drop_all_tables():
-    """Drop all existing tables in the database"""
-    try:
-        inspector = inspect(engine)
-        existing_tables = inspector.get_table_names()
-
-        if existing_tables:
-            logger.info(f"Found {len(existing_tables)} existing tables: {existing_tables}")
-
-            with engine.connect() as conn:
-                # For PostgreSQL, use CASCADE to handle foreign keys
-                for table_name in existing_tables:
-                    conn.execute(text(f"DROP TABLE IF EXISTS \"{table_name}\" CASCADE;"))
-                    logger.info(f"Dropped table: {table_name}")
-
-                conn.commit()
-
-            logger.info("All existing tables dropped successfully")
-        else:
-            logger.info("No existing tables found")
-
-    except Exception as e:
-        logger.error(f"Error dropping tables: {str(e)}")
-        # Alternative PostgreSQL approach
-        try:
-            with engine.connect() as conn:
-                # Get all table names from information_schema
-                result = conn.execute(text("""
-                                           SELECT tablename
-                                           FROM pg_tables
-                                           WHERE schemaname = 'public'
-                                           """))
-                tables = [row[0] for row in result]
-
-                if tables:
-                    logger.info(f"Found {len(tables)} PostgreSQL tables: {tables}")
-
-                    # Drop all tables with CASCADE
-                    for table in tables:
-                        conn.execute(text(f"DROP TABLE IF EXISTS \"{table}\" CASCADE;"))
-                        logger.info(f"Dropped PostgreSQL table: {table}")
-
-                    conn.commit()
-                    logger.info("All PostgreSQL tables dropped successfully")
-                else:
-                    logger.info("No PostgreSQL tables found")
-
-        except Exception as pg_error:
-            logger.error(f"PostgreSQL drop error: {str(pg_error)}")
-            raise
-
-
-def create_all_tables():
-    """Create all tables defined in models"""
-    try:
-        Base.metadata.create_all(bind=engine)
-        logger.info("All tables created successfully")
-    except Exception as e:
-        logger.error(f"Error creating tables: {str(e)}")
-        raise
 
 
 def create_initial_admin():
@@ -234,39 +174,6 @@ def get_database_stats():
         db.close()
 
 
-def reset_database():
-    """Complete database reset - drop all tables and recreate"""
-    try:
-        logger.info("Starting complete database reset...")
-
-        # Step 1: Drop all existing tables
-        drop_all_tables()
-
-        # Step 2: Create all tables fresh
-        create_all_tables()
-
-        # Step 3: Create initial admin user
-        admin_user = create_initial_admin()
-
-        # Step 4: Create sample data
-        create_sample_data()
-
-        logger.info("Database reset completed successfully")
-
-        return {
-            "success": True,
-            "message": "Database reset completed",
-            "admin_user": {
-                "id": admin_user.id,
-                "phone": admin_user.phone,
-                "role": admin_user.role
-            },
-            "stats": get_database_stats()
-        }
-
-    except Exception as e:
-        logger.error(f"Database reset failed: {str(e)}")
-        raise Exception(f"Database reset failed: {str(e)}")
 
 
 # API Endpoints
@@ -317,57 +224,8 @@ def create_admin_user():
         raise HTTPException(status_code=500, detail=f"Admin creation failed: {str(e)}")
 
 
-@app.post("/init-db", tags=["Database Management"])
-def initialize_database():
-    """
-    Complete database initialization:
-    1. Drops all existing tables
-    2. Creates fresh tables
-    3. Creates admin user (phone: +998990330919, password: admin123)
-    4. Creates sample groups and subjects
-    """
-    try:
-        logger.info("Starting database initialization...")
-        result = reset_database()
-
-        return {
-            "message": "Database initialized successfully",
-            "details": result,
-            "admin_credentials": {
-                "phone": "+998990330919",
-                "password": "admin123",
-                "role": "admin"
-            }
-        }
-
-    except Exception as e:
-        logger.error(f"Database initialization failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Database initialization failed: {str(e)}")
 
 
-@app.post("/reset-db", tags=["Database Management"])
-def reset_database_endpoint():
-    """
-    DANGER: This will completely reset the database!
-    All data will be lost and fresh tables will be created.
-    """
-    try:
-        logger.warning("Database reset requested - all data will be lost!")
-        result = reset_database()
-
-        return {
-            "message": "Database reset completed - ALL DATA WAS DESTROYED",
-            "details": result,
-            "admin_credentials": {
-                "phone": "+998990330919",
-                "password": "admin123",
-                "role": "admin"
-            }
-        }
-
-    except Exception as e:
-        logger.error(f"Database reset failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Database reset failed: {str(e)}")
 
 
 @app.get("/db-stats", tags=["Database Management"])
@@ -498,15 +356,18 @@ async def parents_websocket(websocket: WebSocket):
 @app.get("/activity/status", tags=["Activity Tracking"])
 async def get_activity_status(current_user: User = Depends(get_current_user)):
     """Get current activity tracking status"""
-    from app.services.websocket_manager import user_activity_store
+    from app.models.models import UserActivity
     
     db = next(get_db())
     try:
-        users = db.query(User).filter(User.is_active == True).all()
+        # Get recent activity from database
+        recent_activity = db.query(User, UserActivity).outerjoin(
+            UserActivity, User.id == UserActivity.user_id
+        ).filter(User.is_active == True).limit(50).all()
         
         activity_list = []
-        for user in users:
-            last_active = user_activity_store.get(user.id)
+        for user, activity in recent_activity:
+            last_active = activity.last_active if activity else None
             activity_list.append({
                 "user_id": user.id,
                 "phone": user.phone,

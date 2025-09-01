@@ -295,10 +295,11 @@ def get_published_news():
 
 @app.websocket("/ws/students")
 async def students_websocket(websocket: WebSocket):
-    await websocket.accept()
+    import uuid
+    connection_id = hash(str(uuid.uuid4()))
     
     try:
-        connected = await student_manager.connect(websocket, 0)  # Use 0 as dummy ID for broadcast
+        connected = await student_manager.connect(websocket, connection_id)
         if not connected:
             return
         
@@ -306,19 +307,20 @@ async def students_websocket(websocket: WebSocket):
             while True:
                 await websocket.receive_text()
         except WebSocketDisconnect:
-            student_manager.disconnect(0)
+            student_manager.disconnect(connection_id)
     
     except Exception as e:
         logger.error(f"Students WebSocket error: {e}")
-        student_manager.disconnect(0)
+        student_manager.disconnect(connection_id)
 
 
 @app.websocket("/ws/teachers")
 async def teachers_websocket(websocket: WebSocket):
-    await websocket.accept()
+    import uuid
+    connection_id = hash(str(uuid.uuid4()))
     
     try:
-        connected = await teacher_manager.connect(websocket, 0)
+        connected = await teacher_manager.connect(websocket, connection_id)
         if not connected:
             return
         
@@ -326,19 +328,20 @@ async def teachers_websocket(websocket: WebSocket):
             while True:
                 await websocket.receive_text()
         except WebSocketDisconnect:
-            teacher_manager.disconnect(0)
+            teacher_manager.disconnect(connection_id)
     
     except Exception as e:
         logger.error(f"Teachers WebSocket error: {e}")
-        teacher_manager.disconnect(0)
+        teacher_manager.disconnect(connection_id)
 
 
 @app.websocket("/ws/parents")
 async def parents_websocket(websocket: WebSocket):
-    await websocket.accept()
+    import uuid
+    connection_id = hash(str(uuid.uuid4()))
     
     try:
-        connected = await parent_manager.connect(websocket, 0)
+        connected = await parent_manager.connect(websocket, connection_id)
         if not connected:
             return
         
@@ -346,11 +349,11 @@ async def parents_websocket(websocket: WebSocket):
             while True:
                 await websocket.receive_text()
         except WebSocketDisconnect:
-            parent_manager.disconnect(0)
+            parent_manager.disconnect(connection_id)
     
     except Exception as e:
         logger.error(f"Parents WebSocket error: {e}")
-        parent_manager.disconnect(0)
+        parent_manager.disconnect(connection_id)
 
 
 @app.get("/activity/status", tags=["Activity Tracking"])

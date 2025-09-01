@@ -108,14 +108,14 @@ parent_manager = WebSocketManager()
 async def periodic_broadcast_students():
     while True:
         await student_manager.broadcast_activity_data_by_role("student")
-        await asyncio.sleep(10)
+        await asyncio.sleep(1)
 
 async def periodic_broadcast_teachers():
     while True:
         await teacher_manager.broadcast_activity_data_by_role("teacher")
-        await asyncio.sleep(10)
+        await asyncio.sleep(1)
 
 async def periodic_broadcast_parents():
     while True:
         await parent_manager.broadcast_activity_data_by_role("parent")
-        await asyncio.sleep(10)
+        await asyncio.sleep(1)

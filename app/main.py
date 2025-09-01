@@ -498,21 +498,21 @@ async def parents_websocket(websocket: WebSocket):
 @app.get("/activity/status", tags=["Activity Tracking"])
 async def get_activity_status(current_user: User = Depends(get_current_user)):
     """Get current activity tracking status"""
+    from app.services.websocket_manager import user_activity_store
+    
     db = next(get_db())
     try:
-        recent_activity = db.query(User).filter(
-            User.is_active == True,
-            User.last_active.isnot(None)
-        ).order_by(User.last_active.desc()).limit(50).all()
+        users = db.query(User).filter(User.is_active == True).all()
         
         activity_list = []
-        for user in recent_activity:
+        for user in users:
+            last_active = user_activity_store.get(user.id)
             activity_list.append({
                 "user_id": user.id,
                 "phone": user.phone,
                 "full_name": user.full_name,
                 "role": user.role,
-                "last_active": user.last_active.isoformat() if user.last_active else None
+                "last_active": last_active.isoformat() if last_active else None
             })
         
         return {

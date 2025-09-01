@@ -10,6 +10,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# In-memory activity store
+user_activity_store: Dict[int, datetime] = {}
+
+def update_user_activity(user_id: int):
+    """Update user's last active time in memory"""
+    user_activity_store[user_id] = datetime.utcnow()
+
+def get_user_activity(user_id: int) -> datetime:
+    """Get user's last active time from memory"""
+    return user_activity_store.get(user_id)
+
 class WebSocketManager:
     def __init__(self):
         self.active_connections: Dict[int, WebSocket] = {}
@@ -52,16 +63,19 @@ class WebSocketManager:
             activity_data = []
             
             for user in users:
+                # Get last_active from in-memory store
+                last_active = get_user_activity(user.id)
+                
                 # Calculate if user is online (active within 30 seconds)
                 is_online = False
-                if user.last_active:
-                    time_diff = (current_time - user.last_active).total_seconds()
+                if last_active:
+                    time_diff = (current_time - last_active).total_seconds()
                     is_online = time_diff <= 30
                 
                 activity_data.append({
                     "user_id": user.id,
                     "phone": user.phone,
-                    "last_active": user.last_active.isoformat() if user.last_active else None,
+                    "last_active": last_active.isoformat() if last_active else None,
                     "is_online": is_online,
                     "role": user.role,
                     "full_name": user.full_name

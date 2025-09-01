@@ -1,30 +1,9 @@
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from datetime import datetime
-from sqlalchemy.orm import Session
-from app.database import get_db
-from app.models.models import User
 import logging
 
 logger = logging.getLogger(__name__)
-
-class ActivityTrackingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        
-        # Only track activity for authenticated requests
-        if hasattr(request.state, 'user_id'):
-            try:
-                db = next(get_db())
-                db.query(User).filter(User.id == request.state.user_id).update({
-                    'last_active': datetime.utcnow()
-                })
-                db.commit()
-                db.close()
-            except Exception as e:
-                logger.error(f"Failed to update user activity: {e}")
-        
-        return response
 
 def get_user_from_token(request: Request) -> int:
     """Extract user ID from JWT token in request headers"""
@@ -51,15 +30,11 @@ class EnhancedActivityTrackingMiddleware(BaseHTTPMiddleware):
         
         response = await call_next(request)
         
-        # Update last_active time after successful request
+        # Update last_active time in memory after successful request
         if user_id:
             try:
-                db = next(get_db())
-                db.query(User).filter(User.id == user_id).update({
-                    'last_active': datetime.utcnow()
-                })
-                db.commit()
-                db.close()
+                from app.services.websocket_manager import update_user_activity
+                update_user_activity(user_id)
             except Exception as e:
                 logger.error(f"Failed to update user activity for user {user_id}: {e}")
         
